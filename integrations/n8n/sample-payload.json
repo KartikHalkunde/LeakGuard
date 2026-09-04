@@ -1,0 +1,346 @@
+{
+  "version": "1.0",
+  "summary": {
+    "definite": 4,
+    "likely": 6,
+    "possible": 0,
+    "safe": 0,
+    "total": 10,
+    "files_scanned": 10,
+    "duration_ms": 7
+  },
+  "findings": [
+    {
+      "fingerprint": "34c5ba7c11c3c4fd",
+      "confidence": "definite",
+      "resource": "sqlite3.Connection",
+      "file": "app/06_decoy_with.py",
+      "function": "export",
+      "variable": "conn",
+      "acquired_at": {
+        "line": 4,
+        "col": 4,
+        "snippet": "conn = sqlite3.connect(db)"
+      },
+      "leak_path": [
+        {
+          "line": 4,
+          "note": "conn opened here"
+        }
+      ],
+      "close_found_at": [],
+      "close_unreachable_from": 1,
+      "exit_kind": "exception",
+      "reason": "reaches exception exit with conn still open",
+      "fix_available": false,
+      "severity": "high",
+      "ordinal": 0,
+      "escape_kind": null,
+      "block_path": [
+        0,
+        1
+      ]
+    },
+    {
+      "fingerprint": "b0b4539e2eefdcf7",
+      "confidence": "definite",
+      "resource": "builtins.file",
+      "file": "app/07_conditional_close.py",
+      "function": "process",
+      "variable": "f",
+      "acquired_at": {
+        "line": 3,
+        "col": 4,
+        "snippet": "f = open(path)"
+      },
+      "leak_path": [
+        {
+          "line": 3,
+          "note": "f opened here"
+        }
+      ],
+      "close_found_at": [
+        5
+      ],
+      "close_unreachable_from": 1,
+      "exit_kind": "exception",
+      "reason": "reaches exception exit with f still open; close() at line 5 is unreachable on this path",
+      "fix_available": true,
+      "severity": "high",
+      "ordinal": 0,
+      "escape_kind": null,
+      "block_path": [
+        0,
+        1
+      ]
+    },
+    {
+      "fingerprint": "e3ef21326fa8eeee",
+      "confidence": "definite",
+      "resource": "builtins.file",
+      "file": "app/09_break_before_close.py",
+      "function": "find_first",
+      "variable": "f",
+      "acquired_at": {
+        "line": 4,
+        "col": 8,
+        "snippet": "f = open(path)"
+      },
+      "leak_path": [
+        {
+          "line": 4,
+          "note": "f opened here"
+        }
+      ],
+      "close_found_at": [
+        7
+      ],
+      "close_unreachable_from": 1,
+      "exit_kind": "exception",
+      "reason": "reaches exception exit with f still open; close() at line 7 is unreachable on this path",
+      "fix_available": true,
+      "severity": "high",
+      "ordinal": 0,
+      "escape_kind": null,
+      "block_path": [
+        3,
+        1
+      ]
+    },
+    {
+      "fingerprint": "13cf5a65c6a3db3e",
+      "confidence": "definite",
+      "resource": "builtins.file",
+      "file": "app/10_multi_resource.py",
+      "function": "process",
+      "variable": "g",
+      "acquired_at": {
+        "line": 4,
+        "col": 4,
+        "snippet": "g = open(path_b)"
+      },
+      "leak_path": [
+        {
+          "line": 4,
+          "note": "g opened here"
+        }
+      ],
+      "close_found_at": [],
+      "close_unreachable_from": 1,
+      "exit_kind": "exception",
+      "reason": "reaches exception exit with g still open",
+      "fix_available": false,
+      "severity": "high",
+      "ordinal": 1,
+      "escape_kind": null,
+      "block_path": [
+        2,
+        1
+      ]
+    },
+    {
+      "fingerprint": "7657001ae01ba409",
+      "confidence": "likely",
+      "resource": "builtins.file",
+      "file": "app/01_early_return.py",
+      "function": "read",
+      "variable": "f",
+      "acquired_at": {
+        "line": 3,
+        "col": 4,
+        "snippet": "f = open(path)"
+      },
+      "leak_path": [
+        {
+          "line": 3,
+          "note": "f opened here"
+        }
+      ],
+      "close_found_at": [
+        6
+      ],
+      "close_unreachable_from": 1,
+      "exit_kind": "exception",
+      "reason": "reaches exception exit with f still open; close() at line 6 is unreachable on this path",
+      "fix_available": true,
+      "severity": "medium",
+      "ordinal": 0,
+      "escape_kind": null,
+      "block_path": [
+        0,
+        1
+      ]
+    },
+    {
+      "fingerprint": "c913dfc2dec59d13",
+      "confidence": "likely",
+      "resource": "builtins.file",
+      "file": "app/02_loop_leak.py",
+      "function": "process_all",
+      "variable": "f",
+      "acquired_at": {
+        "line": 4,
+        "col": 8,
+        "snippet": "f = open(path)"
+      },
+      "leak_path": [
+        {
+          "line": 4,
+          "note": "f opened here"
+        }
+      ],
+      "close_found_at": [
+        6
+      ],
+      "close_unreachable_from": 1,
+      "exit_kind": "exception",
+      "reason": "reaches exception exit with f still open; close() at line 6 is unreachable on this path",
+      "fix_available": true,
+      "severity": "medium",
+      "ordinal": 0,
+      "escape_kind": null,
+      "block_path": [
+        3,
+        1
+      ]
+    },
+    {
+      "fingerprint": "496ee8037bf72f6f",
+      "confidence": "likely",
+      "resource": "builtins.file",
+      "file": "app/03_exception_path.py",
+      "function": "load",
+      "variable": "f",
+      "acquired_at": {
+        "line": 3,
+        "col": 4,
+        "snippet": "f = open(path)"
+      },
+      "leak_path": [
+        {
+          "line": 3,
+          "note": "f opened here"
+        }
+      ],
+      "close_found_at": [
+        5
+      ],
+      "close_unreachable_from": 1,
+      "exit_kind": "exception",
+      "reason": "reaches exception exit with f still open; close() at line 5 is unreachable on this path",
+      "fix_available": true,
+      "severity": "medium",
+      "ordinal": 0,
+      "escape_kind": null,
+      "block_path": [
+        0,
+        1
+      ]
+    },
+    {
+      "fingerprint": "8f6ba21861173625",
+      "confidence": "likely",
+      "resource": "builtins.file",
+      "file": "app/05_overwritten.py",
+      "function": "process",
+      "variable": "f",
+      "acquired_at": {
+        "line": 3,
+        "col": 4,
+        "snippet": "f = open(path_a)"
+      },
+      "leak_path": [
+        {
+          "line": 3,
+          "note": "f opened here"
+        }
+      ],
+      "close_found_at": [
+        5
+      ],
+      "close_unreachable_from": 1,
+      "exit_kind": "exception",
+      "reason": "reaches exception exit with f still open; close() at line 5 is unreachable on this path",
+      "fix_available": true,
+      "severity": "medium",
+      "ordinal": 0,
+      "escape_kind": null,
+      "block_path": [
+        0,
+        1
+      ]
+    },
+    {
+      "fingerprint": "8841f8be96402f5a",
+      "confidence": "likely",
+      "resource": "builtins.file",
+      "file": "app/08_nested_early_return.py",
+      "function": "process",
+      "variable": "f",
+      "acquired_at": {
+        "line": 3,
+        "col": 4,
+        "snippet": "f = open(path)"
+      },
+      "leak_path": [
+        {
+          "line": 3,
+          "note": "f opened here"
+        }
+      ],
+      "close_found_at": [
+        7
+      ],
+      "close_unreachable_from": 1,
+      "exit_kind": "exception",
+      "reason": "reaches exception exit with f still open; close() at line 7 is unreachable on this path",
+      "fix_available": true,
+      "severity": "medium",
+      "ordinal": 0,
+      "escape_kind": null,
+      "block_path": [
+        0,
+        1
+      ]
+    },
+    {
+      "fingerprint": "478eed7e30afe1e5",
+      "confidence": "likely",
+      "resource": "builtins.file",
+      "file": "app/10_multi_resource.py",
+      "function": "process",
+      "variable": "f",
+      "acquired_at": {
+        "line": 3,
+        "col": 4,
+        "snippet": "f = open(path_a)"
+      },
+      "leak_path": [
+        {
+          "line": 3,
+          "note": "f opened here"
+        }
+      ],
+      "close_found_at": [
+        5
+      ],
+      "close_unreachable_from": 1,
+      "exit_kind": "exception",
+      "reason": "reaches exception exit with f still open; close() at line 5 is unreachable on this path",
+      "fix_available": true,
+      "severity": "medium",
+      "ordinal": 0,
+      "escape_kind": null,
+      "block_path": [
+        0,
+        1
+      ]
+    }
+  ],
+  "context": {
+    "repo": "KartikHalkunde/VH26-CodeBlooded",
+    "commit": "74680a0f1c2d3e4b5a6978890abcdef123456789",
+    "branch": "feat/export-service",
+    "pr_number": 42
+  }
+}
