@@ -1,15 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { organizationSnapshot, type OrganizationSnapshot } from "@/lib/organization";
 
 type View = "overview" | "employees" | "repositories" | "incidents";
 
-function useOrganization() {
+function useOrganization(filters: { range: string; search: string; repository: string; employee: string }) {
   const [data, setData] = useState(organizationSnapshot);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { void fetch("/api/organization").then((r) => r.ok ? r.json() : Promise.reject()).then(setData).finally(() => setLoading(false)); }, []);
+  useEffect(() => {
+    const query = new URLSearchParams({ ...filters, pageSize: "50" });
+    const timer = window.setTimeout(() => { setLoading(true); void fetch(`/api/organization?${query}`).then((r) => r.ok ? r.json() : Promise.reject()).then(setData).finally(() => setLoading(false)); }, 180);
+    return () => window.clearTimeout(timer);
+  }, [filters.range, filters.search, filters.repository, filters.employee]);
   return { data, loading };
+}
+
+function FilterBar({ data, filters, setFilters }: { data: OrganizationSnapshot; filters: { range: string; search: string; repository: string; employee: string }; setFilters: (next: typeof filters) => void }) {
+  return <section className="filter-bar"><div><label htmlFor="org-search">Search employee, repo, error or reason</label><input id="org-search" value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} placeholder="Search organization..."/></div><div><label htmlFor="date-range">Date range</label><select id="date-range" value={filters.range} onChange={(event) => setFilters({ ...filters, range: event.target.value })}><option value="today">Today</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="90d">Last 90 days</option></select></div><div><label htmlFor="repo-filter">Repository</label><select id="repo-filter" value={filters.repository} onChange={(event) => setFilters({ ...filters, repository: event.target.value })}><option value="all">All repositories</option>{organizationSnapshot.repositories.map((repo) => <option key={repo.name}>{repo.name}</option>)}</select></div><div><label htmlFor="employee-filter">Employee</label><select id="employee-filter" value={filters.employee} onChange={(event) => setFilters({ ...filters, employee: event.target.value })}><option value="all">All employees</option>{organizationSnapshot.employees.map((employee) => <option value={employee.login} key={employee.login}>{employee.name}</option>)}</select></div><button onClick={() => setFilters({ range: "7d", search: "", repository: "all", employee: "all" })}>Reset</button><small>{data.pagination ? `${data.pagination.totalEmployees} employees · ${data.pagination.totalIncidents} incidents` : "Organization scope"}</small></section>;
+}
+
+function DailyTrend({ data }: { data: OrganizationSnapshot }) {
+  const max = Math.max(...data.trend.map((point) => point.opened), 1);
+  return <section className="daily-panel"><header><div><span className="panel-kicker">Daily movement</span><h2>Is the team improving?</h2></div><div className="today-comparison"><b className="good-text">+{data.metrics.cleanRateDelta}%</b><small>clean accuracy</small><b className="good-text">{data.metrics.openDelta}</b><small>open errors</small></div></header><div className="daily-chart">{data.trend.map((point) => <div className="day-column" key={point.date}><span className="accuracy-label">{point.accuracy}%</span><div className="day-bars"><i className="opened" style={{ height: `${Math.max(8, point.opened / max * 100)}%` }}/><i className="fixed" style={{ height: `${Math.max(8, point.fixed / max * 100)}%` }}/></div><small>{point.date}</small></div>)}</div><footer><span><i className="opened"/> errors opened</span><span><i className="fixed"/> errors fixed</span><strong>Today: {data.trend.at(-1)?.fixed} fixed vs {data.trend.at(-1)?.opened} opened</strong></footer></section>;
 }
 
 function Metrics({ data }: { data: OrganizationSnapshot }) {
@@ -39,12 +52,14 @@ function RepoPortfolio({ data, detailed = false }: { data: OrganizationSnapshot;
 }
 
 function IncidentTable({ data, limit }: { data: OrganizationSnapshot; limit?: number }) {
+  const [selected, setSelected] = useState<string | null>(null);
   const incidents = limit ? data.incidents.slice(0, limit) : data.incidents;
-  return <section className="admin-card"><div className="admin-card-head"><div><span className="panel-kicker">GitHub enforcement</span><h2>Recent incidents</h2></div><span className="admin-help">Only changed Python files scanned</span></div><div className="admin-table-wrap"><table className="admin-table incident-table"><thead><tr><th>Incident</th><th>Employee / repository</th><th>Finding</th><th>Pull request</th><th>Gate</th></tr></thead><tbody>{incidents.map((incident) => <tr key={incident.id}><td><strong>{incident.id}</strong><small>{incident.detectedAt}</small></td><td><strong>@{incident.employee}</strong><small>{incident.repository} · {incident.branch}</small></td><td><span className={`severity ${incident.confidence}`}>{incident.confidence}</span><strong>{incident.resource}</strong><small>{incident.file}</small></td><td>#{incident.pr}</td><td><span className={`gate ${incident.gate}`}>{incident.gate === "blocked" ? "× Merge blocked" : "✓ Merge allowed"}</span></td></tr>)}</tbody></table></div></section>;
+  return <section className="admin-card"><div className="admin-card-head"><div><span className="panel-kicker">GitHub enforcement</span><h2>Employee errors with reasons</h2></div><span className="admin-help">Click for reasoning and technical evidence</span></div><div className="admin-table-wrap"><table className="admin-table incident-table"><thead><tr><th>Incident</th><th>Employee / repository</th><th>Finding</th><th>Pull request</th><th>Gate</th></tr></thead><tbody>{incidents.map((incident) => <Fragment key={incident.id}><tr className="clickable-incident" onClick={() => setSelected(selected === incident.id ? null : incident.id)}><td><strong>{incident.id}</strong><small>{incident.detectedAt}</small></td><td><strong>@{incident.employee}</strong><small>{incident.repository} · {incident.branch}</small></td><td><span className={`severity ${incident.confidence}`}>{incident.confidence}</span><strong>{incident.resource}</strong><small>{incident.file}</small></td><td>#{incident.pr}</td><td><span className={`gate ${incident.gate}`}>{incident.gate === "blocked" ? "Blocked" : "Allowed"}</span></td></tr>{selected === incident.id && <tr className="incident-evidence"><td colSpan={5}><div><span><small>Why LeakGuard flagged it</small><strong>{incident.reason}</strong><em>Coaching context for @{incident.employee}</em></span><span><small>Technical witness path</small><ol>{incident.leakPath.map((step) => <li key={step}>{step}</li>)}</ol></span></div></td></tr>}</Fragment>)}</tbody></table></div></section>;
 }
 
 export function AdminDashboard({ view }: { view: View }) {
-  const { data, loading } = useOrganization();
+  const [filters, setFilters] = useState({ range: "7d", search: "", repository: "all", employee: "all" });
+  const { data, loading } = useOrganization(filters);
   const titles = { overview: ["Organization command center", "Security posture across every employee, repository and protected pull request."], employees: ["Employee security", "Compare exact leak types, clean-check accuracy and remediation performance."], repositories: ["Repository risk", "Prioritize repositories carrying the highest unresolved resource-leak debt."], incidents: ["Leak incidents", "Audit every finding attributed to its employee, branch, commit and pull request."] };
-  return <>{loading && <div className="admin-loading"><i/> Syncing organization data</div>}<div className="admin-top"><div><span className="eyebrow">LeakGuard Organization</span><h1 className="page-title">{titles[view][0]}</h1><p className="subtitle">{titles[view][1]}</p></div><div className="org-chip"><span>CB</span><strong>{data.organization}<small>{data.source === "control-plane" ? "Live control plane" : "Demo organization data"}</small></strong></div></div>{view === "overview" && <><Metrics data={data}/><div className="admin-section-title"><h2>Repository portfolio</h2><span>Updated from GitHub Actions</span></div><RepoPortfolio data={data}/><EmployeeTable data={data} compact/><IncidentTable data={data} limit={3}/></>}{view === "employees" && <><EmployeeDirectory data={data}/><EmployeeTable data={data}/></>}{view === "repositories" && <RepoPortfolio data={data} detailed/>}{view === "incidents" && <><Metrics data={data}/><IncidentTable data={data}/></>}</>;
+  return <>{loading && <div className="admin-loading"><i/> Syncing organization data</div>}<div className="admin-top"><div><span className="eyebrow">LeakGuard Organization</span><h1 className="page-title">{titles[view][0]}</h1><p className="subtitle">{titles[view][1]}</p></div><div className="org-chip"><span>CB</span><strong>{data.organization}<small>{data.source === "control-plane" ? "Live control plane" : "Demo organization data"}</small></strong></div></div><FilterBar data={data} filters={filters} setFilters={setFilters}/>{view === "overview" && <><Metrics data={data}/><DailyTrend data={data}/><div className="admin-section-title"><h2>Repository portfolio</h2><span>Updated from GitHub Actions</span></div><RepoPortfolio data={data}/><EmployeeTable data={data} compact/><IncidentTable data={data} limit={3}/></>}{view === "employees" && <><DailyTrend data={data}/><EmployeeDirectory data={data}/><EmployeeTable data={data}/></>}{view === "repositories" && <RepoPortfolio data={data} detailed/>}{view === "incidents" && <><Metrics data={data}/><IncidentTable data={data}/></>}</>;
 }

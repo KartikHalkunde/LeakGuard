@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
-const links = [["/", "Overview"], ["/employees", "Employees"], ["/repositories", "Repositories"], ["/incidents", "Incidents"], ["/findings", "Finding detail"], ["/cfg", "CFG evidence"], ["/fp-rate", "Accuracy"]];
+const links = [["/", "Overview"], ["/employees", "Employees"], ["/repositories", "Repositories"], ["/incidents", "Incidents"]];
 
 export function Nav() {
   const pathname = usePathname();
