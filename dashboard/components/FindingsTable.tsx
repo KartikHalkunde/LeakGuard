@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fixCommand, loadFindings } from "@/lib/api";
+import { fixCommand, loadFindings, scanRepository } from "@/lib/api";
 import { sampleReport } from "@/lib/sample";
 import type { Finding } from "@/lib/types";
 
@@ -25,6 +25,16 @@ function FindingRow({ finding }: { finding: Finding }) {
 export function FindingsTable() {
   const [report, setReport] = useState(sampleReport);
   const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState("");
+  const [scanError, setScanError] = useState("");
   useEffect(() => { void loadFindings().then(setReport).finally(() => setLoading(false)); }, []);
-  return <div className="table-card"><div className="table-head"><span>{report.summary.total} open findings</span><span className="muted">{loading ? <span className="data-loading inline"><i/> Syncing findings</span> : "Click a row for its witness path"}</span></div><div className="table-scroll"><table><thead><tr><th>Confidence</th><th>Location</th><th>Resource</th><th>Reason</th><th>Action</th></tr></thead><tbody>{report.findings.map((finding) => <FindingRow finding={finding} key={finding.fingerprint}/>)}</tbody></table></div></div>;
+  const scan = () => {
+    setScanning(true); setScanStatus(""); setScanError("");
+    void scanRepository().then((next) => {
+      setReport(next);
+      setScanStatus(`Scanned ${next.summary.files_scanned ?? "—"} files · found ${next.summary.total ?? next.findings.length} leaks · ${next.summary.duration_ms ?? 0}ms`);
+    }).catch((reason: unknown) => setScanError(reason instanceof Error ? reason.message : "Scan failed")).finally(() => setScanning(false));
+  };
+  return <div className="table-card"><div className="table-head"><span>{report.summary.total} open findings <small className="table-source">{report.meta?.repository} · {report.meta?.source === "live-report" ? "live report" : "fixtures"}</small></span><div className="findings-actions"><span className="muted">{loading ? <span className="data-loading inline"><i/> Syncing findings</span> : scanStatus ? <span className="scan-result success">✓ {scanStatus}</span> : scanError ? <span className="scan-result error">× {scanError}</span> : "Click a row for its witness path"}</span><button className={`scan-button ${scanStatus ? "scanned" : ""}`} disabled={loading || scanning} onClick={scan}>{scanning ? "Scanning..." : scanStatus ? "✓ Scanned" : "Scan now"}</button></div></div><div className="table-scroll"><table><thead><tr><th>Confidence</th><th>Location</th><th>Resource</th><th>Reason</th><th>Action</th></tr></thead><tbody>{report.findings.map((finding) => <FindingRow finding={finding} key={finding.fingerprint}/>)}</tbody></table></div></div>;
 }
