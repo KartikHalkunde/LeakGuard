@@ -7,11 +7,13 @@ import { sampleFp, sampleTrend } from "@/lib/sample";
 
 export function DebtPanel() {
   const [data, setData] = useState(sampleTrend);
-  useEffect(() => { void loadTrend().then(setData); }, []);
-  return <DebtChart data={data}/>;
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { void loadTrend().then(setData).finally(() => setLoading(false)); }, []);
+  return <div className="data-panel">{loading && <span className="data-loading"><i/> Syncing data</span>}<DebtChart data={data}/></div>;
 }
 export function FpPanel() {
   const [data, setData] = useState(sampleFp);
-  useEffect(() => { void loadFpRate().then(setData); }, []);
-  return <FpChart data={data}/>;
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { void loadFpRate().then(setData).finally(() => setLoading(false)); }, []);
+  return <div className="data-panel">{loading && <span className="data-loading"><i/> Syncing data</span>}<FpChart data={data}/></div>;
 }

@@ -24,6 +24,7 @@ function FindingRow({ finding }: { finding: Finding }) {
 
 export function FindingsTable() {
   const [report, setReport] = useState(sampleReport);
-  useEffect(() => { void loadFindings().then(setReport); }, []);
-  return <div className="table-card"><div className="table-head"><span>{report.summary.total} open findings</span><span className="muted">Click a row for its witness path</span></div><div className="table-scroll"><table><thead><tr><th>Confidence</th><th>Location</th><th>Resource</th><th>Reason</th><th>Action</th></tr></thead><tbody>{report.findings.map((finding) => <FindingRow finding={finding} key={finding.fingerprint}/>)}</tbody></table></div></div>;
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { void loadFindings().then(setReport).finally(() => setLoading(false)); }, []);
+  return <div className="table-card"><div className="table-head"><span>{report.summary.total} open findings</span><span className="muted">{loading ? <span className="data-loading inline"><i/> Syncing findings</span> : "Click a row for its witness path"}</span></div><div className="table-scroll"><table><thead><tr><th>Confidence</th><th>Location</th><th>Resource</th><th>Reason</th><th>Action</th></tr></thead><tbody>{report.findings.map((finding) => <FindingRow finding={finding} key={finding.fingerprint}/>)}</tbody></table></div></div>;
 }

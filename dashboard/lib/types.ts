@@ -19,6 +19,7 @@ export interface Report {
   version: string;
   summary: Record<string, number>;
   findings: Finding[];
+  meta?: { repository: string; scope: string; source: "live-report" | "demo-fixture"; generated_at?: string };
 }
 export interface TrendPoint { date: string; open: number; definite: number }
 export interface FpPoint { date: string; rate: number }

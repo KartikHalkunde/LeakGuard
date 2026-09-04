@@ -2,6 +2,7 @@ import type { FpPoint, Report, TrendPoint } from "./types";
 
 export const sampleReport: Report = {
   version: "1.0",
+  meta: { repository: "LeakGuard demo", scope: "bundled fixtures", source: "demo-fixture" },
   summary: { total: 3, definite: 1, likely: 2, possible: 0, files_scanned: 12, duration_ms: 84 },
   findings: [
     {
