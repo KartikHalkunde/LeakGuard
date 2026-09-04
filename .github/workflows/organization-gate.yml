@@ -1,0 +1,29 @@
+name: LeakGuard Organization Gate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: read
+
+jobs:
+  leakguard:
+    name: Changed-code leak policy
+    runs-on: ubuntu-latest
+    env:
+      LEAKGUARD_SECRET: ${{ secrets.LEAKGUARD_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./
+        with:
+          paths: "."
+          diff-only: "true"
+          fail-on: "likely"
+          control-plane: ${{ secrets.LEAKGUARD_CONTROL_PLANE_URL }}
+          upload-sarif: "true"

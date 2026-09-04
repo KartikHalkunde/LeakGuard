@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS runs (
     branch       TEXT,
     commit_sha   TEXT,
     pr_number    INTEGER,
+    actor        TEXT,
+    event        TEXT,
+    base_sha     TEXT,
+    run_url      TEXT,
+    gate_status  TEXT        CHECK (gate_status IN ('passed','blocked','error')),
     definite     INTEGER     NOT NULL DEFAULT 0,
     likely       INTEGER     NOT NULL DEFAULT 0,
     possible     INTEGER     NOT NULL DEFAULT 0,
@@ -77,6 +82,7 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 
 CREATE INDEX IF NOT EXISTS runs_repo_created_idx ON runs (repo, created_at DESC);
+CREATE INDEX IF NOT EXISTS runs_actor_created_idx ON runs (actor, created_at DESC);
 
 -- ---------------------------------------------------------------------------
 -- system_errors: global n8n error-trigger sink (same pattern as Axon)

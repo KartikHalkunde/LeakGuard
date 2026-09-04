@@ -192,6 +192,10 @@ def _render(fmt: str, findings: list[Finding], files: list[Path], duration_ms: i
             commit=gitutil.current_commit(),
             branch=gitutil.current_branch(),
             pr_number=gitutil.current_pr_number(),
+            actor=gitutil.current_actor(),
+            event=gitutil.current_event(),
+            base_sha=gitutil.current_base_sha(),
+            run_url=gitutil.current_run_url(),
         )
     if fmt == "sarif":
         return sarif_report.render(findings, version=VERSION)

@@ -128,3 +128,23 @@ def current_pr_number() -> int | None:
         except ValueError:
             return None
     return None
+
+
+def current_actor() -> str | None:
+    """GitHub user responsible for the push or pull-request update."""
+    return os.environ.get("GITHUB_ACTOR")
+
+
+def current_event() -> str | None:
+    return os.environ.get("GITHUB_EVENT_NAME")
+
+
+def current_base_sha() -> str | None:
+    return os.environ.get("LEAKGUARD_BASE_SHA") or os.environ.get("GITHUB_BASE_SHA")
+
+
+def current_run_url() -> str | None:
+    server = os.environ.get("GITHUB_SERVER_URL")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    return f"{server}/{repo}/actions/runs/{run_id}" if server and repo and run_id else None

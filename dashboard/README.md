@@ -1,6 +1,8 @@
 # LeakGuard dashboard
 
-Four Next.js views show leak debt, findings with witness paths, measured false-positive rate, and CFGs. The bundled API reads `../leakguard.json` and visibly labels the repository and source. Set `LEAKGUARD_REPORT_PATH`, `LEAKGUARD_REPOSITORY`, and `LEAKGUARD_SCAN_SCOPE` to override them, or set `NEXT_PUBLIC_CONTROL_PLANE_URL` to use n8n. Missing reports visibly fall back to demo fixtures.
+The default experience is now the LeakGuard Organization admin console: employee security performance, repository risk, blocked pull requests and centrally attributed incidents. Technical evidence views still expose findings, measured false-positive rate and CFGs.
+
+Set `LEAKGUARD_CONTROL_PLANE_URL` and `LEAKGUARD_DASHBOARD_TOKEN` for live organization analytics. Without them, the UI clearly labels bundled demo organization data. The detailed findings API reads `../leakguard.json`; set `LEAKGUARD_REPORT_PATH`, `LEAKGUARD_REPOSITORY`, and `LEAKGUARD_SCAN_SCOPE` to override it.
 
 Generate the default report before starting the dashboard:
 

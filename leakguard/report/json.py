@@ -29,6 +29,10 @@ def build(
     commit: str | None = None,
     branch: str | None = None,
     pr_number: int | None = None,
+    actor: str | None = None,
+    event: str | None = None,
+    base_sha: str | None = None,
+    run_url: str | None = None,
 ) -> dict:
     findings = list(findings)
 
@@ -55,6 +59,10 @@ def build(
             ("commit", commit),
             ("branch", branch),
             ("pr_number", pr_number),
+            ("actor", actor),
+            ("event", event),
+            ("base_sha", base_sha),
+            ("run_url", run_url),
         )
         if v is not None
     }

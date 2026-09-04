@@ -75,12 +75,21 @@ runs:
     - name: Run LeakGuard
       id: scan
       shell: bash
+      env:
+        LEAKGUARD_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_DIFF_ONLY: ${{ inputs.diff-only }}
       run: |
         set +e
-        leakguard check ${{ inputs.paths }} \
-          --fail-on "${{ inputs.fail-on }}" \
-          --baseline "${{ inputs.baseline }}" \
-          ${{ inputs.diff-only == 'true' && '--diff-only' || '' }} \
+        read -r -a SCAN_PATHS <<< "$INPUT_PATHS"
+        DIFF_ARGS=()
+        if [ "$INPUT_DIFF_ONLY" = "true" ]; then DIFF_ARGS+=(--diff-only); fi
+        leakguard check "${SCAN_PATHS[@]}" \
+          --fail-on "$INPUT_FAIL_ON" \
+          --baseline "$INPUT_BASELINE" \
+          "${DIFF_ARGS[@]}" \
           --format sarif \
           --output leakguard.sarif
         SCAN_CODE=$?
@@ -88,12 +97,23 @@ runs:
 
         # Second pass for the machine-readable payload. --fail-on=never so
         # this pass cannot itself decide the build outcome.
-        leakguard check ${{ inputs.paths }} \
-          --baseline "${{ inputs.baseline }}" \
-          ${{ inputs.diff-only == 'true' && '--diff-only' || '' }} \
+        leakguard check "${SCAN_PATHS[@]}" \
+          --baseline "$INPUT_BASELINE" \
+          "${DIFF_ARGS[@]}" \
           --fail-on never \
           --format json \
           --output leakguard.json || true
+
+        export SCAN_CODE
+        python - <<'PY'
+        import json, os, pathlib
+        path = pathlib.Path("leakguard.json")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        context = payload.setdefault("context", {})
+        context["gate_status"] = "blocked" if os.environ["SCAN_CODE"] == "1" else "passed"
+        context["scan_mode"] = "diff" if os.environ["INPUT_DIFF_ONLY"] == "true" else "full"
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        PY
 
         echo "code=$SCAN_CODE" >> "$GITHUB_OUTPUT"
         python - <<'PY' >> "$GITHUB_OUTPUT"
@@ -141,6 +161,10 @@ runs:
         {
           echo "### LeakGuard"
           echo ""
+          echo "- employee: @${{ github.actor }}"
+          echo "- repository: ${{ github.repository }}"
+          echo "- branch: ${{ github.head_ref || github.ref_name }}"
+          echo "- scan mode: ${{ inputs.diff-only == 'true' && 'changed Python files only' || 'full repository' }}"
           echo "- definite: ${{ steps.scan.outputs.definite }}"
           echo "- total (after baseline): ${{ steps.scan.outputs.total }}"
         } >> "$GITHUB_STEP_SUMMARY"
