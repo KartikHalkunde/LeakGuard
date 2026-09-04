@@ -13,17 +13,15 @@ import pytest
 
 from leakguard.cli import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, main
 from leakguard.core.finding import Confidence, Finding
-from leakguard.engine import STUB_MARKER as STUB  # imported, never hardcoded
+
+#: A genuine leak: acquired, then every path reaches an exit without a close.
+LEAKY_SRC = "import sqlite3\n\n\ndef f():\n    conn = sqlite3.connect('db')\n    return None\n"
 
 
 @pytest.fixture
 def leaky(tmp_path):
     p = tmp_path / "leaky.py"
-    p.write_text(
-        f"import sqlite3\n\n\ndef f():\n    conn = sqlite3.connect('db')  {STUB}\n"
-        "    return None\n",
-        encoding="utf-8",
-    )
+    p.write_text(LEAKY_SRC, encoding="utf-8")
     return p
 
 
@@ -102,14 +100,15 @@ def test_output_to_file(leaky, tmp_path):
 
 def test_directory_scan_finds_nested(tmp_path):
     (tmp_path / "pkg").mkdir()
-    (tmp_path / "pkg" / "a.py").write_text(f"x = 1  {STUB}\n", encoding="utf-8")
+    (tmp_path / "pkg" / "a.py").write_text(LEAKY_SRC, encoding="utf-8")
     assert main(["check", str(tmp_path), "--no-baseline"]) == EXIT_FINDINGS
 
 
 def test_excluded_dirs_skipped(tmp_path):
+    """A real leak inside .venv must still be ignored."""
     venv = tmp_path / ".venv"
     venv.mkdir()
-    (venv / "bad.py").write_text(f"x = 1  {STUB}\n", encoding="utf-8")
+    (venv / "bad.py").write_text(LEAKY_SRC, encoding="utf-8")
     assert main(["check", str(tmp_path), "--no-baseline"]) == EXIT_OK
 
 
