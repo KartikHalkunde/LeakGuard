@@ -1,18 +1,71 @@
 {
   "name": "leakguard-vscode",
   "displayName": "LeakGuard",
-  "description": "Path-aware Python resource leak diagnostics and verified quick fixes.",
-  "version": "0.1.0",
+  "description": "Path-aware Python resource leak diagnostics, verified quick fixes, and commit protection.",
+  "version": "0.2.0",
   "publisher": "leakguard",
   "engines": { "vscode": "^1.80.0" },
   "categories": ["Linters"],
-  "activationEvents": ["onLanguage:python", "onCommand:leakguard.fix", "onCommand:leakguard.scan"],
+  "activationEvents": [
+    "onLanguage:python",
+    "workspaceContains:**/*.py",
+    "onView:leakguard.findings",
+    "onCommand:leakguard.scanWorkspace",
+    "onCommand:leakguard.enableProtection"
+  ],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": [
-      { "command": "leakguard.scan", "title": "LeakGuard: Scan Current File" },
-      { "command": "leakguard.fix", "title": "LeakGuard: Apply Verified Fix" }
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "leakguard",
+          "title": "LeakGuard",
+          "icon": "resources/shield.svg"
+        }
+      ]
+    },
+    "views": {
+      "leakguard": [
+        {
+          "id": "leakguard.findings",
+          "name": "Resource Leaks",
+          "contextualTitle": "LeakGuard"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "leakguard.findings",
+        "contents": "No leaks found yet.\n\n[Scan workspace](command:leakguard.scanWorkspace)\n\nLeakGuard analyses every path through each function, including exception paths.\n\n[Enable commit protection](command:leakguard.enableProtection)"
+      }
     ],
+    "commands": [
+      { "command": "leakguard.scan", "title": "Scan Current File", "category": "LeakGuard" },
+      { "command": "leakguard.scanWorkspace", "title": "Scan Workspace", "category": "LeakGuard", "icon": "$(search)" },
+      { "command": "leakguard.fix", "title": "Apply Verified Fix", "category": "LeakGuard", "icon": "$(wand)" },
+      { "command": "leakguard.aiFix", "title": "Suggest a Fix with AI", "category": "LeakGuard", "icon": "$(sparkle)" },
+      { "command": "leakguard.fixAll", "title": "Apply All Verified Fixes", "category": "LeakGuard", "icon": "$(check-all)" },
+      { "command": "leakguard.enableProtection", "title": "Enable Commit Protection", "category": "LeakGuard", "icon": "$(shield)" },
+      { "command": "leakguard.disableProtection", "title": "Disable Commit Protection", "category": "LeakGuard" },
+      { "command": "leakguard.commit", "title": "Commit Changes", "category": "LeakGuard", "icon": "$(git-commit)" },
+      { "command": "leakguard.focusPanel", "title": "Show Panel", "category": "LeakGuard" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "leakguard.scanWorkspace", "when": "view == leakguard.findings", "group": "navigation@1" },
+        { "command": "leakguard.fixAll", "when": "view == leakguard.findings", "group": "navigation@2" },
+        { "command": "leakguard.commit", "when": "view == leakguard.findings", "group": "navigation@3" },
+        { "command": "leakguard.enableProtection", "when": "view == leakguard.findings && !leakguard.protected", "group": "navigation@4" }
+      ],
+      "view/item/context": [
+        { "command": "leakguard.fix", "when": "view == leakguard.findings && viewItem == leakguard.fixable", "group": "inline@1" },
+        { "command": "leakguard.aiFix", "when": "view == leakguard.findings && viewItem == leakguard.aiOnly", "group": "inline@1" },
+        { "command": "leakguard.aiFix", "when": "view == leakguard.findings && viewItem == leakguard.fixable", "group": "inline@2" }
+      ],
+      "commandPalette": [
+        { "command": "leakguard.focusPanel", "when": "false" }
+      ]
+    },
     "configuration": {
       "title": "LeakGuard",
       "properties": {
@@ -21,8 +74,29 @@
           "default": "leakguard",
           "description": "Path to the LeakGuard executable."
         },
-        "leakguard.scanOnOpen": { "type": "boolean", "default": true },
-        "leakguard.scanOnSave": { "type": "boolean", "default": true }
+        "leakguard.failOn": {
+          "type": "string",
+          "enum": ["definite", "likely", "possible"],
+          "default": "likely",
+          "description": "Minimum confidence that blocks a commit. Written into the pre-commit hook."
+        },
+        "leakguard.scanOnOpen": { "type": "boolean", "default": true, "description": "Scan Python files when they open." },
+        "leakguard.scanOnSave": { "type": "boolean", "default": true, "description": "Scan Python files on save." },
+        "leakguard.openai.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Suggest fixes with OpenAI for leaks the deterministic rewriter cannot fix.\n\n**Off by default.** When enabled, the enclosing function - never the whole file - is sent to OpenAI. Every suggestion is re-analysed locally and discarded unless the leak is provably gone."
+        },
+        "leakguard.openai.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "OpenAI API key. Falls back to the `OPENAI_API_KEY` environment variable."
+        },
+        "leakguard.openai.model": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "description": "OpenAI model used for fix suggestions."
+        }
       }
     }
   },
