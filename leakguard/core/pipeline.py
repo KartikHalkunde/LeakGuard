@@ -10,7 +10,7 @@ from leakguard.catalog.loader import Catalog, load_catalog
 
 from .cfg import CFG, build_cfg, dotted
 from .dataflow import analyze_cfg
-from .escape import Summary, build_summaries
+from .escape import build_summaries
 from .finding import Finding
 from .parse import import_aliases, iter_functions
 

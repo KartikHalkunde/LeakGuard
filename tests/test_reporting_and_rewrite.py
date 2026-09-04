@@ -7,7 +7,7 @@ from leakguard.core.finding import Confidence, Finding
 from leakguard.fix.rewrite import make_patch, verified_patch
 from leakguard.report.json import build_report, render as render_json
 from leakguard.report.text import render as render_text
-from tests.fixtures.cfgs import early_return_leak, simple_leak
+from tests.fixtures.cfgs import simple_leak
 
 
 def test_fingerprint_ignores_whitespace_and_string_contents() -> None:

@@ -19,7 +19,6 @@ uninstalled the same afternoon.
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import sys
 import time
 from pathlib import Path
