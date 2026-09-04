@@ -1,0 +1,21 @@
+name: LeakGuard
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: KartikHalkunde/VH26-CodeBlooded@nikita
+        with:
+          paths: app
+          fail-on: likely
+          diff-only: false
+          upload-sarif: true
