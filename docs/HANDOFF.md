@@ -16,7 +16,7 @@
 | VS Code diagnostics and quick-fix | Compiled and unit tested |
 | Dashboard and local report APIs | Production build and CI verified |
 | Realistic demo repository | 10 seeded findings + safe examples |
-| Optional n8n/Postgres history | Local assets complete; deployment optional |
+| Scan history | Complete: append-only local history; optional n8n/Postgres adapter included |
 
 ## Measured evidence
 
@@ -46,8 +46,9 @@ cd dashboard && npm run dev
 
 The strict demo scan intentionally exits `1`. Show the witness path, preview a
 verified fix, then open the dashboard and use **Scan now** to refresh the same
-report. The dashboard visibly distinguishes live report data from fallback
-fixtures and labels non-live history.
+report. Every dashboard scan appends to `.leakguard-cache/dashboard-history.json`
+and immediately refreshes the trend. The dashboard visibly distinguishes live
+report data from fallback fixtures.
 
 ## Trigger points
 
@@ -66,4 +67,4 @@ fixtures and labels non-live history.
 2. Start the dashboard and confirm the repository/source badge says live.
 3. Open the VS Code Extension Development Host and save a seeded Python file.
 4. Keep one PR with a required failing LeakGuard check for the blocked-merge demo.
-5. Tag a release and replace mutable `nikita` references in demo integration files.
+5. Follow `docs/JUDGE-DEMO.md` for the visual acceptance and recording sequence.

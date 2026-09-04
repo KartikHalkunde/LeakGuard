@@ -1,5 +1,6 @@
 repos:
   - repo: https://github.com/KartikHalkunde/VH26-CodeBlooded
-    rev: nikita
+    # Immutable revision: reproducible installs; update only for a released analyzer.
+    rev: 356b8730439967d4c9e8026366384d7e5ea3ecd9
     hooks:
       - id: leakguard-strict

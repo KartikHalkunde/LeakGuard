@@ -8,7 +8,12 @@ import { sampleFp, sampleTrend } from "@/lib/sample";
 export function DebtPanel() {
   const [data, setData] = useState(sampleTrend);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { void loadTrend().then(setData).finally(() => setLoading(false)); }, []);
+  useEffect(() => {
+    const refresh = () => { setLoading(true); void loadTrend().then(setData).finally(() => setLoading(false)); };
+    refresh();
+    window.addEventListener("leakguard:scan-complete", refresh);
+    return () => window.removeEventListener("leakguard:scan-complete", refresh);
+  }, []);
   return <div className="data-panel">{loading && <span className="data-loading"><i/> Syncing data</span>}<DebtChart data={data}/></div>;
 }
 export function FpPanel() {

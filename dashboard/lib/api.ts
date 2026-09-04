@@ -48,6 +48,8 @@ export async function scanRepository(): Promise<Report> {
   if (!response.ok) throw new Error(`Scan failed (${response.status})`);
   const report = await response.json() as Report;
   cache.set("/findings", { expires: Date.now() + CACHE_MS, value: report });
+  cache.delete("/trend");
+  window.dispatchEvent(new Event("leakguard:scan-complete"));
   return report;
 }
 
