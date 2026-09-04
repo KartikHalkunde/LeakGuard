@@ -1,13 +1,35 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "leakguard"
 version = "0.1.0"
-requires-python = ">=3.10"
+description = "Static resource-leak detection for Python, enforced in CI"
+readme = "README.md"
+# 3.11+ because config.py uses the stdlib `tomllib`, added in 3.11.
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+]
+
+[project.scripts]
+leakguard = "leakguard.cli:run"
+
+[tool.setuptools.packages.find]
+include = ["leakguard*"]
+
+[tool.setuptools.package-data]
+leakguard = ["catalog/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-q"
-

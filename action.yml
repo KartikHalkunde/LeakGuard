@@ -1,0 +1,156 @@
+# LeakGuard GitHub Action.
+#
+# Consumed by other repos as:
+#
+#   - uses: <org>/leakguard@v0.1.0
+#     with:
+#       fail-on: definite
+#
+# MUST live at the repository root for the short `uses:` form to work.
+#
+# Design rule: the required path (scan -> SARIF -> pass/fail) never depends on
+# the optional path (control plane). If n8n is down, CI still behaves
+# correctly.
+
+name: LeakGuard
+description: Static resource-leak detection for Python, enforced in CI
+author: LeakGuard
+branding:
+  icon: shield
+  color: red
+
+inputs:
+  paths:
+    description: Paths to scan
+    required: false
+    default: "."
+  fail-on:
+    description: Minimum confidence that fails the build (definite|likely|possible|never)
+    required: false
+    default: "definite"
+  diff-only:
+    description: Only analyze files changed in this PR
+    required: false
+    default: "true"
+  baseline:
+    description: Path to the baseline suppression file
+    required: false
+    default: ".leakguard-baseline.json"
+  python-version:
+    description: Python version to run the analyzer on
+    required: false
+    default: "3.11"
+  control-plane:
+    description: Optional n8n control-plane base URL. Leave empty to disable.
+    required: false
+    default: ""
+  upload-sarif:
+    description: Upload SARIF to GitHub code scanning
+    required: false
+    default: "true"
+
+outputs:
+  definite:
+    description: Number of definite findings
+    value: ${{ steps.scan.outputs.definite }}
+  total:
+    description: Total findings after baseline filtering
+    value: ${{ steps.scan.outputs.total }}
+  sarif-file:
+    description: Path to the generated SARIF file
+    value: leakguard.sarif
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install LeakGuard
+      shell: bash
+      run: pip install --quiet "${{ github.action_path }}"
+
+    - name: Run LeakGuard
+      id: scan
+      shell: bash
+      run: |
+        set +e
+        leakguard check ${{ inputs.paths }} \
+          --fail-on "${{ inputs.fail-on }}" \
+          --baseline "${{ inputs.baseline }}" \
+          ${{ inputs.diff-only == 'true' && '--diff-only' || '' }} \
+          --format sarif \
+          --output leakguard.sarif
+        SCAN_CODE=$?
+        set -e
+
+        # Second pass for the machine-readable payload. --fail-on=never so
+        # this pass cannot itself decide the build outcome.
+        leakguard check ${{ inputs.paths }} \
+          --baseline "${{ inputs.baseline }}" \
+          ${{ inputs.diff-only == 'true' && '--diff-only' || '' }} \
+          --fail-on never \
+          --format json \
+          --output leakguard.json || true
+
+        echo "code=$SCAN_CODE" >> "$GITHUB_OUTPUT"
+        python - <<'PY' >> "$GITHUB_OUTPUT"
+        import json, pathlib
+        try:
+            s = json.loads(pathlib.Path("leakguard.json").read_text())["summary"]
+        except Exception:
+            s = {}
+        print(f"definite={s.get('definite', 0)}")
+        print(f"total={s.get('total', 0)}")
+        PY
+
+    - name: Upload SARIF
+      if: always() && inputs.upload-sarif == 'true'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: leakguard.sarif
+        category: leakguard
+
+    # Optional: forward findings to the control plane. Never source code -
+    # only path, line, resource type and fingerprint. `|| echo` means an
+    # unreachable control plane cannot break the build.
+    - name: Notify control plane
+      if: always() && inputs.control-plane != ''
+      shell: bash
+      env:
+        LEAKGUARD_SECRET: ${{ env.LEAKGUARD_SECRET }}
+      run: |
+        if [ -z "${LEAKGUARD_SECRET:-}" ]; then
+          echo "LEAKGUARD_SECRET not set; skipping control-plane notify"
+          exit 0
+        fi
+        SIG=$(leakguard sign leakguard.json)
+        curl -sf -X POST "${{ inputs.control-plane }}/ingest" \
+          -H "Content-Type: application/json" \
+          -H "X-LeakGuard-Signature: $SIG" \
+          --max-time 10 \
+          -d @leakguard.json \
+          || echo "control plane unreachable - continuing"
+
+    - name: Job summary
+      if: always()
+      shell: bash
+      run: |
+        {
+          echo "### LeakGuard"
+          echo ""
+          echo "- definite: ${{ steps.scan.outputs.definite }}"
+          echo "- total (after baseline): ${{ steps.scan.outputs.total }}"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    # Deliberately last: exit 1 only for findings (code 1). A tool error
+    # (code 2) warns but does not block - fail closed on findings, fail open
+    # on ourselves.
+    - name: Enforce
+      if: steps.scan.outputs.code == '1'
+      shell: bash
+      run: |
+        echo "::error::LeakGuard found resource leaks at or above the '${{ inputs.fail-on }}' threshold"
+        exit 1

@@ -1,48 +1,99 @@
-"""Human-readable terminal rendering for findings."""
+"""Human-readable terminal output.
+
+Merged from the P2 and P3 branches. P3's version is kept for one concrete
+reason: the P2 version used the U+00B7 and U+2192 separators, which raise
+UnicodeEncodeError on a Windows cp1252 console. Demo machines are Windows,
+so the renderer stays ASCII-only. P2's `colour` keyword is accepted so their
+call sites keep working.
+"""
 
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterable
 
 from leakguard.core.finding import Confidence, Finding
 
-
-_COLOURS = {
-    Confidence.DEFINITE: "\033[31m",
-    Confidence.LIKELY: "\033[33m",
-    Confidence.POSSIBLE: "\033[36m",
+COLORS = {
+    Confidence.DEFINITE: "\033[31m",  # red
+    Confidence.LIKELY: "\033[33m",  # yellow
+    Confidence.POSSIBLE: "\033[36m",  # cyan
+    Confidence.SAFE: "\033[32m",  # green
 }
-_RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
 
 
-def _label(confidence: Confidence, colour: bool) -> str:
-    label = f"LEAK ({confidence.value})"
-    return f"{_COLOURS.get(confidence, '')}{label}{_RESET}" if colour else label
+def _use_color(stream) -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    return hasattr(stream, "isatty") and stream.isatty()
 
 
-def render(findings: Iterable[Finding], *, files_scanned: int = 0, duration_ms: int = 0, colour: bool | None = None) -> str:
+def render(
+    findings: Iterable[Finding],
+    *,
+    files_scanned: int = 0,
+    duration_ms: int = 0,
+    stream=None,
+    colour: bool | None = None,
+) -> str:
     findings = list(findings)
-    if colour is None:
-        colour = not bool(os.environ.get("NO_COLOR"))
-    sections: list[str] = []
-    for finding in findings:
-        lines = [
-            f"{_label(finding.confidence, colour)} · {finding.resource} · {finding.file}:{finding.function}",
-            "",
-            f"  opened   line {finding.acquired_line}    {finding.snippet}",
-        ]
-        if finding.leak_path:
-            path = " → ".join(str(step.line) for step in finding.leak_path)
-            lines.append(f"  path     {path} ({finding.exit_kind})")
-        lines.append(f"  reason   {finding.reason}")
-        for line in finding.close_found_at:
-            suffix = f"    unreachable from block {finding.close_unreachable_from}" if finding.close_unreachable_from is not None else ""
-            lines.append(f"  close    line {line}{suffix}")
-        sections.append("\n".join(lines))
-    counts = {confidence: sum(f.confidence is confidence for f in findings) for confidence in Confidence}
-    sections.append(
-        f"{counts[Confidence.DEFINITE]} definite, {counts[Confidence.LIKELY]} likely, "
-        f"{counts[Confidence.POSSIBLE]} possible · {files_scanned} files · {duration_ms}ms"
-    )
-    return "\n\n".join(sections) + "\n"
+    stream = stream or sys.stdout
+    color = _use_color(stream) if colour is None else colour
+
+    def c(text: str, code: str) -> str:
+        return f"{code}{text}{RESET}" if color else text
+
+    out: list[str] = []
+
+    for f in findings:
+        out.append(
+            f"{c('LEAK', COLORS[f.confidence])} "
+            f"({f.confidence.value}) - {f.resource} - "
+            f"{c(f.file, BOLD)}:{f.function}"
+        )
+        out.append("")
+        out.append(f"  opened   line {f.acquired_line:<5} {f.snippet}")
+
+        if f.leak_path:
+            arrow = " -> ".join(str(s.line) for s in f.leak_path)
+            kind = f" ({f.exit_kind})" if f.exit_kind else ""
+            out.append(f"  path     {arrow}{kind}")
+
+        if f.reason:
+            out.append(f"  reason   {f.reason}")
+
+        if f.close_found_at:
+            closes = ", ".join(str(n) for n in f.close_found_at)
+            note = ""
+            if f.close_unreachable_from is not None:
+                note = f"   unreachable from line {f.close_unreachable_from}"
+            out.append(f"  close    line {closes}{note}")
+        elif f.confidence is not Confidence.POSSIBLE:
+            out.append("  close    none found in this function")
+
+        if f.escape_kind:
+            out.append(c(f"  escapes  via {f.escape_kind} - not conclusive", DIM))
+
+        if f.fix_available:
+            out.append(c("  fix      available - run `leakguard fix --write`", DIM))
+
+        out.append("")
+
+    counts = {k: 0 for k in ("definite", "likely", "possible")}
+    for f in findings:
+        if f.confidence.value in counts:
+            counts[f.confidence.value] += 1
+
+    if findings:
+        summary = ", ".join(f"{v} {k}" for k, v in counts.items() if v)
+    else:
+        summary = c("no leaks found", COLORS[Confidence.SAFE])
+
+    out.append(f"{summary} - {files_scanned} files - {duration_ms}ms")
+    return "\n".join(out)
