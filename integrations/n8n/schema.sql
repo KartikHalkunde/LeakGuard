@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS findings (
     branch       TEXT,
     commit_sha   TEXT,
     pr_number    INTEGER,
+    actor        TEXT,
     confidence   TEXT        NOT NULL CHECK (confidence IN
                              ('definite','likely','possible','safe')),
     resource     TEXT        NOT NULL,
@@ -34,9 +35,14 @@ CREATE TABLE IF NOT EXISTS findings (
     CONSTRAINT findings_repo_fingerprint_key UNIQUE (repo, fingerprint)
 );
 
+-- Safe migration for control planes created before employee attribution.
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS actor TEXT;
+
 CREATE INDEX IF NOT EXISTS findings_repo_status_idx  ON findings (repo, status);
 CREATE INDEX IF NOT EXISTS findings_confidence_idx   ON findings (repo, confidence);
 CREATE INDEX IF NOT EXISTS findings_pr_idx           ON findings (repo, pr_number);
+CREATE INDEX IF NOT EXISTS findings_actor_status_idx ON findings (actor, status);
+CREATE INDEX IF NOT EXISTS findings_repo_actor_idx   ON findings (repo, actor);
 
 -- ---------------------------------------------------------------------------
 -- triage: the human feedback loop -- the differentiator
@@ -83,6 +89,27 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS runs_repo_created_idx ON runs (repo, created_at DESC);
 CREATE INDEX IF NOT EXISTS runs_actor_created_idx ON runs (actor, created_at DESC);
+
+-- Refresh after ingestion. This keeps organization dashboards fast even when
+-- millions of CI runs are retained: the UI reads one row per employee/day.
+CREATE MATERIALIZED VIEW IF NOT EXISTS employee_daily_security AS
+SELECT
+    date_trunc('day', created_at)::date AS day,
+    actor,
+    repo,
+    COUNT(*) AS scans,
+    COUNT(*) FILTER (WHERE gate_status = 'passed') AS clean_scans,
+    COUNT(*) FILTER (WHERE gate_status = 'blocked') AS blocked_scans,
+    SUM(definite) AS definite,
+    SUM(likely) AS likely,
+    SUM(possible) AS possible,
+    SUM(total) AS findings
+FROM runs
+WHERE actor IS NOT NULL
+GROUP BY day, actor, repo;
+
+CREATE UNIQUE INDEX IF NOT EXISTS employee_daily_security_key
+    ON employee_daily_security (day, actor, repo);
 
 -- ---------------------------------------------------------------------------
 -- system_errors: global n8n error-trigger sink (same pattern as Axon)

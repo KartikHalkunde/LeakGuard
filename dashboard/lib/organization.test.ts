@@ -26,4 +26,25 @@ describe("organization snapshot", () => {
     expect(organizationSnapshot.repositories.every((repository) => repository.members.every((member) => employees.has(member.login)))).toBe(true);
     expect(organizationSnapshot.employees.every((employee) => employee.repositories.every((repository) => repositories.has(repository.repository)))).toBe(true);
   });
+
+  it("keeps coaching evidence on every attributed incident", () => {
+    expect(organizationSnapshot.incidents.every((incident) =>
+      incident.reason.length > 10 && incident.leakPath.length >= 2
+    )).toBe(true);
+  });
+
+  it("shows daily improvement with comparable opened and fixed counts", () => {
+    expect(organizationSnapshot.trend.length).toBeGreaterThan(1);
+    const today = organizationSnapshot.trend.at(-1)!;
+    expect(today.fixed).toBeGreaterThanOrEqual(today.opened);
+    expect(today.accuracy).toBeGreaterThan(0);
+  });
+
+  it("groups repository contributors into accountable teams", () => {
+    const employees = new Set(organizationSnapshot.employees.map((employee) => employee.login));
+    expect(organizationSnapshot.repositories.every((repository) => repository.teams.length > 0)).toBe(true);
+    expect(organizationSnapshot.repositories.every((repository) => repository.teams.every((team) =>
+      employees.has(team.lead) && team.members.every((login) => employees.has(login))
+    ))).toBe(true);
+  });
 });
