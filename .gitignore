@@ -1,0 +1,37 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# LeakGuard outputs
+leakguard.sarif
+leakguard.json
+.leakguard-cache/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (VS Code extension / dashboard)
+node_modules/
+out/
+.next/
+*.vsix
+
+# Secrets
+.env
+.env.local

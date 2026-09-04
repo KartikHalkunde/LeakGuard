@@ -1,0 +1,35 @@
+# Consumed by other repos via:
+#
+#   repos:
+#     - repo: https://github.com/<org>/leakguard
+#       rev: v0.1.0
+#       hooks:
+#         - id: leakguard
+#
+# MUST live at the repository root - `pre-commit` looks for it there.
+#
+# Latency budget: under 1 second. Hooks that feel slow get bypassed with
+# --no-verify, and a bypassed hook catches nothing.
+#
+# This hook runs FULLY OFFLINE. No network call, no source code leaves the
+# machine. The control plane is a CI-only concern.
+
+- id: leakguard
+  name: LeakGuard resource-leak check
+  description: Detects resources opened but not closed on all code paths
+  entry: leakguard check
+  language: python
+  types: [python]
+  pass_filenames: true
+  require_serial: false
+  args: ["--fail-on=definite", "--no-baseline"]
+
+- id: leakguard-strict
+  name: LeakGuard resource-leak check (strict)
+  description: Also fails on likely leaks - for teams that trust the tool
+  entry: leakguard check
+  language: python
+  types: [python]
+  pass_filenames: true
+  require_serial: false
+  args: ["--fail-on=likely"]

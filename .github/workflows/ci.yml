@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main, P1, P2, P3, P4]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Tests
+        run: pytest -q
+
+      - name: CLI smoke test
+        run: |
+          set -euo pipefail
+          leakguard --version
+          leakguard check --help > /dev/null
+
+          # Build fixtures rather than asserting against our own source tree:
+          # a smoke test that depends on the repo happening to be clean breaks
+          # the moment anyone adds a marker string anywhere.
+          mkdir -p /tmp/smoke
+          MARKER="# LEAKGUARD_""STUB_LEAK"
+          printf 'import sqlite3\n\n\ndef f():\n    conn = sqlite3.connect("db")  %s\n    return None\n' \
+            "$MARKER" > /tmp/smoke/leaky.py
+          printf 'def f(p):\n    with open(p) as fh:\n        return fh.read()\n' \
+            > /tmp/smoke/clean.py
+
+          echo "-> clean file must exit 0"
+          leakguard check /tmp/smoke/clean.py --fail-on definite --no-baseline
+
+          echo "-> leaky file must exit 1"
+          if leakguard check /tmp/smoke/leaky.py --fail-on definite --no-baseline; then
+            echo "::error::exit-code contract broken: a definite finding did not fail"
+            exit 1
+          fi
+
+          echo "-> --fail-on never must exit 0 even with findings"
+          leakguard check /tmp/smoke/leaky.py --fail-on never --no-baseline > /dev/null
+
+          echo "-> SARIF and JSON must be well-formed"
+          leakguard check /tmp/smoke/leaky.py --format sarif --fail-on never --no-baseline \
+            | python -m json.tool > /dev/null
+          leakguard check /tmp/smoke/leaky.py --format json --fail-on never --no-baseline \
+            | python -m json.tool > /dev/null
+
+          echo "-> baseline ratchet: snapshot then re-check must be green"
+          cd /tmp/smoke
+          leakguard baseline . > /dev/null
+          leakguard check . --fail-on definite
+
+  self-scan:
+    # LeakGuard scanning LeakGuard. Non-blocking while the engine is stubbed.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./
+        with:
+          paths: leakguard
+          fail-on: definite
+          diff-only: "false"
+          upload-sarif: "false"
