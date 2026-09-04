@@ -59,3 +59,50 @@ main { padding:44px 48px; max-width:1500px; width:100%; }.eyebrow { text-transfo
 .team-card>div { padding-top:9px;border-top:1px solid #243044;color:var(--muted);font-size:10px }
 .team-card>div b { color:var(--text);margin-right:3px }
 @media(max-width:600px){.personal-bars{gap:4px}.personal-bars span{width:18px}.team-strip{grid-template-columns:1fr}}
+
+/* Backward-compatible guard for browser tabs holding the pre-fix component.
+   Tailwind's `.fixed` utility must never position an analytics bar globally. */
+.daily-panel .day-bars .fixed { position:static!important;inset:auto!important;display:block!important;max-height:100%!important;width:12px!important }
+html,body { max-width:100%;overflow-x:hidden }
+.shell { grid-template-columns:240px minmax(0,1fr);max-width:100vw }
+main,.admin-card,.employee-profile,.daily-panel { min-width:0;max-width:100% }
+.admin-table-wrap { max-width:100%;overscroll-behavior-x:contain }
+.empty-directory { min-height:220px;display:grid;place-content:center;text-align:center }
+.empty-directory h2 { margin:8px 0 }
+.empty-directory p { margin:0;color:var(--muted);font-size:12px }
+.employee-list { max-height:620px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#405574 #101827 }
+.employee-list>header { position:sticky;top:0;z-index:2;background:#101827 }
+.admin-card .admin-table-wrap { max-height:560px;overflow:auto;scrollbar-width:thin;scrollbar-color:#405574 #101827 }
+.admin-table thead { position:sticky;top:0;z-index:2;background:#111a29 }
+.repository-picker { position:sticky;top:10px;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 16px;border:1px solid #34445c;border-radius:13px;background:#0c1522eF;backdrop-filter:blur(14px) }
+.repository-picker span small,.repository-picker span strong { display:block }
+.repository-picker span small { color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px }
+.repository-picker select { width:min(520px,55%);height:40px;padding:0 12px;border:1px solid #34445c;border-radius:9px;background:#08101a;color:var(--text) }
+.admin-pagination { display:flex;align-items:center;justify-content:flex-end;gap:10px;margin:18px 0 6px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#0b131f;color:var(--muted);font-size:11px }
+.admin-pagination>span { margin-right:auto }
+.admin-pagination label { display:flex;align-items:center;gap:7px }
+.admin-pagination select,.admin-pagination button { height:34px;padding:0 11px;border:1px solid #34445c;border-radius:8px;background:#131e30;color:var(--text) }
+.admin-pagination button { cursor:pointer }
+.admin-pagination button:disabled { opacity:.4;cursor:not-allowed }
+.admin-pagination strong { min-width:82px;text-align:center;color:var(--text) }
+@media(max-width:700px){.repository-picker{align-items:stretch;flex-direction:column}.repository-picker select{width:100%}.admin-pagination{flex-wrap:wrap}.admin-pagination>span{width:100%;margin:0}.admin-pagination strong{order:5}}
+.profile-kpis { grid-template-columns:repeat(6,1fr) }
+.repo-accuracy { min-width:125px }
+.repo-accuracy>i { display:block;width:110px;height:5px;margin:5px 0;background:#202c3c;border-radius:6px;overflow:hidden }
+.repo-accuracy>i>em { display:block;height:100%;background:linear-gradient(90deg,var(--red),var(--green));border-radius:6px }
+.repository-browser-head { display:flex;align-items:end;justify-content:space-between;padding:4px 2px }
+.repository-browser-head h2 { margin:5px 0 0;font-size:20px }
+.repository-browser-head>small { color:var(--muted) }
+.repository-selector-grid { max-height:300px;overflow-y:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:3px 5px 12px 2px;scrollbar-width:thin;scrollbar-color:#405574 #101827 }
+.repo-select-card { display:grid;grid-template-columns:36px minmax(0,1fr) auto auto;align-items:center;gap:11px;padding:14px;border:1px solid var(--line);border-radius:13px;background:linear-gradient(145deg,#121b29,#0c131f);color:var(--text);text-align:left;cursor:pointer;transition:border-color .15s,transform .15s,background .15s }
+.repo-select-card:hover { transform:translateY(-1px);border-color:#4b6488 }
+.repo-select-card.active { border-color:var(--blue);background:linear-gradient(145deg,#172944,#101b2c);box-shadow:inset 3px 0 var(--blue),0 0 20px #5da8ff12 }
+.repo-select-card.critical:not(.active) { border-color:#65313a }
+.repo-select-card.high:not(.active) { border-color:#5d4b2b }
+.repo-select-card span strong,.repo-select-card span small { display:block }
+.repo-select-card span small { color:var(--muted);font-size:9px;margin-top:3px }
+.repo-select-card>span:nth-child(3) { text-align:center }
+.repo-select-card>span:nth-child(3)>b { font-size:19px;color:var(--red) }
+.repo-select-card>em { min-width:52px;padding:4px 7px;border-radius:12px;background:#291a20;color:#ff9da5;font-size:8px;font-style:normal;text-align:center;text-transform:uppercase }
+@media(max-width:1100px){.profile-kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:700px){.repository-selector-grid{grid-template-columns:1fr}.repository-browser-head{display:block}.repository-browser-head>small{display:block;margin:6px 0}.profile-kpis{grid-template-columns:repeat(2,1fr)}}

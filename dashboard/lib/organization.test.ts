@@ -10,8 +10,14 @@ describe("organization snapshot", () => {
 
   it("ranks secure employees above high-risk employees", () => {
     const scores = [...organizationSnapshot.employees].sort((a, b) => b.score - a.score);
-    expect(scores[0].login).toBe("kartik-h");
+    expect(scores[0].score).toBeGreaterThan(scores.at(-1)!.score);
     expect(scores.at(-1)?.open).toBeGreaterThan(scores[0].open);
+  });
+
+  it("provides a large paginatable organization demo", () => {
+    expect(organizationSnapshot.employees.length).toBe(1200);
+    expect(organizationSnapshot.repositories.length).toBe(120);
+    expect(organizationSnapshot.incidents.length).toBe(2400);
   });
 
   it("maps every blocked incident to a pull request and employee", () => {

@@ -22,21 +22,33 @@ export async function GET(request: Request) {
       if (response.ok) return NextResponse.json(await response.json());
     } catch { /* Offline-safe admin demo fallback. */ }
   }
-  const matchesSearch = (...values: string[]) => !search || values.some((value) => value.toLowerCase().includes(search));
+  const searchTokens = search.split(/\s+/).filter(Boolean);
+  const matchesSearch = (...values: string[]) => {
+    if (!searchTokens.length) return true;
+    const haystack = values.join(" ").toLowerCase();
+    return searchTokens.every((token) => haystack.includes(token));
+  };
+  const employeeNames = new Map(organizationSnapshot.employees.map((item) => [item.login, item.name]));
+  const searchableIncidents = organizationSnapshot.incidents.filter((item) =>
+    matchesSearch(item.id, item.employee, employeeNames.get(item.employee) ?? "", item.repository, item.file, item.resource, item.reason)
+  );
+  const searchableIncidentIds = new Set(searchableIncidents.map((item) => item.id));
+  const incidentEmployees = new Set(searchableIncidents.map((item) => item.employee));
+  const incidentRepositories = new Set(searchableIncidents.map((item) => item.repository));
   const incidents = organizationSnapshot.incidents.filter((item) =>
     (repository === "all" || item.repository === repository) &&
     (employee === "all" || item.employee === employee) &&
-    matchesSearch(item.id, item.employee, item.repository, item.file, item.resource, item.reason)
+    (!searchTokens.length || searchableIncidentIds.has(item.id))
   );
   const employees = organizationSnapshot.employees.filter((item) =>
     (employee === "all" || item.login === employee) &&
     (repository === "all" || item.repositories.some((entry) => entry.repository === repository)) &&
-    matchesSearch(item.login, item.name, item.topResource)
+    (!searchTokens.length || matchesSearch(item.login, item.name, item.topResource, ...item.repositories.map((entry) => entry.repository)) || incidentEmployees.has(item.login))
   );
   const repositories = organizationSnapshot.repositories.filter((item) =>
     (repository === "all" || item.name === repository) &&
     (employee === "all" || item.members.some((member) => member.login === employee)) &&
-    matchesSearch(item.name, item.language)
+    (!searchTokens.length || matchesSearch(item.name, item.language, ...item.teams.map((team) => team.name)) || incidentRepositories.has(item.name))
   );
   const start = (page - 1) * pageSize;
   return NextResponse.json({

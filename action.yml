@@ -169,12 +169,15 @@ runs:
           echo "- total (after baseline): ${{ steps.scan.outputs.total }}"
         } >> "$GITHUB_STEP_SUMMARY"
 
-    # Deliberately last: exit 1 only for findings (code 1). A tool error
-    # (code 2) warns but does not block - fail closed on findings, fail open
-    # on ourselves.
+    # Deliberately last: findings and analyzer failures both block protected
+    # branches. A security gate must fail closed if it cannot complete.
     - name: Enforce
-      if: steps.scan.outputs.code == '1'
+      if: steps.scan.outputs.code != '0'
       shell: bash
       run: |
-        echo "::error::LeakGuard found resource leaks at or above the '${{ inputs.fail-on }}' threshold"
+        if [ "${{ steps.scan.outputs.code }}" = "1" ]; then
+          echo "::error::LeakGuard found resource leaks at or above the '${{ inputs.fail-on }}' threshold"
+        else
+          echo "::error::LeakGuard could not complete the scan (exit ${{ steps.scan.outputs.code }}); merge blocked"
+        fi
         exit 1

@@ -21,7 +21,7 @@ export interface OrganizationSnapshot {
   pagination?: { page: number; pageSize: number; totalEmployees: number; totalRepositories: number; totalIncidents: number };
 }
 
-export const organizationSnapshot: OrganizationSnapshot = {
+const baseOrganizationSnapshot: OrganizationSnapshot = {
   organization: "CodeBlooded Engineering", source: "demo", generatedAt: "2026-09-05T09:30:00.000Z",
   metrics: { employees: 4, repositories: 3, open: 12, blockedPrs: 3, fixRate: 76, scans: 47, cleanRate: 71, cleanRateDelta: 8, openDelta: -4 },
   employees: [
@@ -48,3 +48,52 @@ export const organizationSnapshot: OrganizationSnapshot = {
     { date: "Today", accuracy: 71, opened: 4, fixed: 8, blocked: 3 },
   ],
 };
+
+const firstNames = ["Aarav", "Aditi", "Aisha", "Akash", "Ananya", "Arjun", "Dev", "Diya", "Ishaan", "Kabir", "Kavya", "Meera", "Neha", "Nikhil", "Priya", "Rahul", "Riya", "Rohan", "Saanvi", "Varun"];
+const domains = ["payments", "identity", "orders", "analytics", "platform", "risk", "billing", "catalog", "support", "data", "notifications", "compliance"];
+const services = ["api", "worker", "portal", "service", "pipeline", "gateway", "scheduler", "console", "engine", "automation"];
+
+function buildLargeDemo(): OrganizationSnapshot {
+  const repositories: RepositoryRisk[] = Array.from({ length: 120 }, (_, index) => {
+    const name = `${domains[index % domains.length]}-${services[Math.floor(index / domains.length) % services.length]}${index >= domains.length * services.length ? `-${index + 1}` : ""}`;
+    return { name, language: "Python", open: 0, blockedPrs: 0, scans: 0, risk: "low", members: [], teams: [] };
+  });
+  const employees: EmployeeRisk[] = Array.from({ length: 1200 }, (_, index) => {
+    const login = `employee-${String(index + 1).padStart(4, "0")}`;
+    const name = `${firstNames[index % firstNames.length]} ${String.fromCharCode(65 + Math.floor(index / firstNames.length) % 26)}.`;
+    const open = index % 9;
+    const scans = 8 + index % 34;
+    const fixed = 3 + index % 24;
+    const cleanRate = Math.max(28, 96 - open * 7 - index % 6);
+    const repoIndexes = [index % repositories.length, (index * 7 + 11) % repositories.length];
+    const repoPerformance = [...new Set(repoIndexes)].map((repoIndex, repoPosition) => {
+      const checks = Math.max(2, Math.floor(scans / repoIndexes.length));
+      const errors = repoPosition === 0 ? open : Math.floor(open / 3);
+      const blocked = errors > 4 ? 1 : 0;
+      repositories[repoIndex].members.push({ login, checks, cleanRate: Math.max(20, cleanRate - repoPosition * 3), errors, blocked });
+      repositories[repoIndex].open += errors;
+      repositories[repoIndex].blockedPrs += blocked;
+      repositories[repoIndex].scans += checks;
+      return { repository: repositories[repoIndex].name, checks, cleanRate: Math.max(20, cleanRate - repoPosition * 3), errors, blocked };
+    });
+    return { login, name, avatar: name[0], scans, blocked: open > 4 ? 1 : 0, open, fixed, fixRate: Math.round(fixed / Math.max(1, fixed + open) * 100), cleanRate, avgFixHours: Number((0.7 + open * 0.8).toFixed(1)), score: Math.max(35, cleanRate - open * 2), scoreDelta: index % 5 - 2, cleanRateDelta: index % 11 - 5, definite: Math.floor(open / 3), likely: Math.ceil(open / 2), possible: open - Math.floor(open / 3) - Math.ceil(open / 2), repeats: Math.floor(open / 4), topResource: ["File handles", "DB connections", "HTTP sessions", "Sockets"][index % 4], repositories: repoPerformance };
+  });
+  repositories.forEach((repo, repoIndex) => {
+    repo.risk = repo.open > 55 ? "critical" : repo.open > 25 ? "high" : "low";
+    const chunks = [repo.members.slice(0, 5), repo.members.slice(5, 10), repo.members.slice(10)];
+    repo.teams = chunks.filter((members) => members.length).map((members, teamIndex) => ({ name: `${domains[repoIndex % domains.length]} ${["Core", "Reliability", "Delivery"][teamIndex]}`, lead: members[0].login, members: members.map((member) => member.login), cleanRate: Math.round(members.reduce((sum, member) => sum + member.cleanRate, 0) / members.length), open: members.reduce((sum, member) => sum + member.errors, 0), blocked: members.reduce((sum, member) => sum + member.blocked, 0) }));
+  });
+  const incidents: Incident[] = Array.from({ length: 2400 }, (_, index) => {
+    const employee = employees[index % employees.length];
+    const repository = employee.repositories[index % employee.repositories.length].repository;
+    const confidence = (["definite", "likely", "possible"] as const)[index % 3];
+    const blocked = confidence !== "possible" && index % 4 !== 0;
+    return { id: `LG-${String(2000 + index)}`, employee: employee.login, repository, branch: `feature/work-${index + 1}`, pr: 100 + index, file: `src/module_${index % 80}.py:${10 + index % 90}`, resource: ["sqlite3.Connection", "builtins.file", "requests.Session", "socket.socket"][index % 4], confidence, status: index % 5 === 0 ? "fixed" : "open", gate: blocked ? "blocked" : "passed", detectedAt: `${1 + index % 59} min ago`, reason: `Resource remains open on the ${index % 2 ? "exception" : "early return"} path; cleanup is not reachable before function exit.`, leakPath: [`L${10 + index % 90} resource opened`, `L${12 + index % 90} branch taken`, `L${14 + index % 90} exit with resource open`] };
+  });
+  const scans = employees.reduce((sum, employee) => sum + employee.scans, 0);
+  const open = incidents.filter((incident) => incident.status === "open").length;
+  const blockedPrs = incidents.filter((incident) => incident.gate === "blocked").length;
+  return { ...baseOrganizationSnapshot, generatedAt: new Date().toISOString(), metrics: { ...baseOrganizationSnapshot.metrics, employees: employees.length, repositories: repositories.length, open, blockedPrs, scans, fixRate: Math.round(incidents.filter((incident) => incident.status === "fixed").length / incidents.length * 100) }, employees, repositories, incidents };
+}
+
+export const organizationSnapshot: OrganizationSnapshot = buildLargeDemo();
