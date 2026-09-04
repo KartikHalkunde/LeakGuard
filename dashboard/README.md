@@ -8,7 +8,7 @@ Generate the default report before starting the dashboard:
 leakguard check tests/corpus/leaky --format json --fail-on never --no-baseline -o leakguard.json
 ```
 
-The dashboard uses dependency-free SVG charts, caches successful API responses for 30 seconds, deduplicates concurrent requests, times out slow endpoints after 1.5 seconds, and loads Mermaid only on the CFG route.
+The dashboard uses dependency-free SVG charts, caches successful API responses for 30 seconds, deduplicates concurrent requests, and caps remote control-plane requests at 600ms. The CFG renderer is dependency-free. **Scan now** runs LeakGuard against the server-configured scope only; browser input can never select an arbitrary command or path.
 
 ```bash
 npm install

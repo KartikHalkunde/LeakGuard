@@ -13,7 +13,7 @@ export async function GET() {
     const report = JSON.parse(raw) as Report;
     report.meta = {
       repository: process.env.LEAKGUARD_REPOSITORY ?? basename(resolve("..")),
-      scope: process.env.LEAKGUARD_SCAN_SCOPE ?? "tests/corpus/leaky",
+      scope: process.env.LEAKGUARD_SCAN_SCOPE ?? "demo-repo/app",
       source: "live-report",
       generated_at: info.mtime.toISOString(),
     };

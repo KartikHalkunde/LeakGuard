@@ -43,6 +43,14 @@ export const loadFindings = () => request<Report>("/findings", sampleReport);
 export const loadTrend = () => request<TrendPoint[]>("/trend", sampleTrend);
 export const loadFpRate = () => request<FpPoint[]>("/fp-rate", sampleFp);
 
+export async function scanRepository(): Promise<Report> {
+  const response = await fetch("/api/scan", { method: "POST", headers: { Accept: "application/json" } });
+  if (!response.ok) throw new Error(`Scan failed (${response.status})`);
+  const report = await response.json() as Report;
+  cache.set("/findings", { expires: Date.now() + CACHE_MS, value: report });
+  return report;
+}
+
 export function fixCommand(file: string): string {
   const quoted = file.includes(" ") ? `"${file.replaceAll('"', '\\"')}"` : file;
   return `leakguard fix ${quoted} --write`;
