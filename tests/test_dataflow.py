@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from leakguard.core.confidence import score
 from leakguard.core.dataflow import State, analyze_cfg, bfs_path, join, solve
 from leakguard.core.escape import Summary, build_summaries
 from leakguard.core.finding import Confidence
 from leakguard.core.ir import CallSite, Release
+from leakguard.core.pipeline import analyze_file
 from tests.fixtures.cfgs import early_return_leak, escaping_no_leak, simple_leak
 
 
@@ -28,6 +31,16 @@ def test_escape_suppresses_a_finding() -> None:
 def test_join_is_monotone_and_escape_dominates() -> None:
     assert join(State.OPEN, State.CLOSED) is State.MAYBE_OPEN
     assert join(State.ESCAPED, State.CLOSED) is State.ESCAPED
+
+
+def test_reacquiring_an_open_variable_preserves_the_lost_handle() -> None:
+    from leakguard.core.ir import Acquire
+
+    state = {"f": State.OPEN}
+    result = __import__("leakguard.core.dataflow", fromlist=["transfer"]).transfer(
+        state, Acquire("f", "builtins.file", 3, 0, "f = open(other)")
+    )
+    assert result["f"] is State.MAYBE_OPEN
 
 
 def test_solver_reaches_empty_entry_successor() -> None:
@@ -55,3 +68,9 @@ def test_summary_builder_records_return_and_parameter_close() -> None:
 
 def test_exception_only_candidate_never_becomes_definite() -> None:
     assert score([{"exit": 1, "exit_kind": "exception"}], [1]) is Confidence.LIKELY
+
+
+def test_early_return_report_prefers_return_and_uses_source_line() -> None:
+    finding = analyze_file(Path("tests/corpus/leaky/01_early_return.py"))[0]
+    assert finding.exit_kind == "return"
+    assert finding.close_unreachable_from == 5

@@ -39,6 +39,22 @@ def test_with_rewrite_and_verification() -> None:
     assert verified_patch(finding, source, lambda _: [finding]) is None
 
 
+def test_with_rewrite_preserves_relative_function_indentation() -> None:
+    source = "def read(path, bad):\n    f = open(path)\n    if bad:\n        return\n    f.close()\n"
+    finding = Finding(Confidence.LIKELY, "builtins.file", "x.py", "read", "f", 2, 4, "f = open(path)", close_found_at=[5])
+    assert make_patch(finding, source) == (
+        "def read(path, bad):\n    with open(path) as f:\n        if bad:\n            return\n"
+    )
+
+
+def test_try_finally_rewrite_for_non_file_resources() -> None:
+    source = "conn = sqlite3.connect(db)\nrow = conn.execute(query)\nconn.close()\n"
+    finding = Finding(Confidence.LIKELY, "sqlite3.Connection", "x.py", "query", "conn", 1, 0, "conn = sqlite3.connect(db)", close_found_at=[3])
+    assert make_patch(finding, source) == (
+        "conn = sqlite3.connect(db)\ntry:\n    row = conn.execute(query)\nfinally:\n    conn.close()\n"
+    )
+
+
 def test_fixture_findings_file_has_five_real_shaped_entries() -> None:
     with open("tests/fixtures/findings.json", encoding="utf-8") as fixture:
         payload = json.load(fixture)

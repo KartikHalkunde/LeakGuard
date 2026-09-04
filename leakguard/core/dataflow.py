@@ -97,9 +97,21 @@ def transfer(
     out = dict(state)
     match event:
         case Acquire(var=var):
-            _set_family(out, var, State.OPEN, aliases)
+            # A second acquisition while the previous handle is still open
+            # means one variable now denotes more than one live handle (loop
+            # iterations and ``f = open(a); f = open(b)``).  A later single
+            # close cannot prove both handles closed.
+            next_state = (
+                State.MAYBE_OPEN
+                if out.get(var) in (State.OPEN, State.MAYBE_OPEN)
+                else State.OPEN
+            )
+            _set_family(out, var, next_state, aliases)
         case Release(var=var):
-            _set_family(out, var, State.CLOSED, aliases)
+            # ``MAYBE_OPEN`` represents at least one previously overwritten
+            # handle. Closing the current variable cannot discharge it.
+            next_state = State.MAYBE_OPEN if out.get(var) is State.MAYBE_OPEN else State.CLOSED
+            _set_family(out, var, next_state, aliases)
         case Escape(var=var):
             _set_family(out, var, State.ESCAPED, aliases)
         case Scoped(var=var):
@@ -188,12 +200,66 @@ def _exit_kind(cfg: CFG, exit_block: int) -> str:
     return cfg.edge_kind(predecessors[0], exit_block) or "fallthrough"
 
 
+def _ignorable_exception_edge(cfg: CFG, source: int) -> bool:
+    """Return whether P1's conservative exception edge cannot leak a handle.
+
+    The CFG deliberately emits an exception edge for every potentially raising
+    call.  Acquisition calls are recorded after their ``Acquire`` event even
+    though a failed acquisition never creates a handle; treating that edge as
+    a leak is a false positive.  ``read`` is likewise a known-safe operation
+    in the MVP catalogue, matching P1's deliberately small safe-call policy.
+    """
+
+    block = cfg.blocks[source]
+    acquire_lines = {
+        event.line for event in block.events if isinstance(event, Acquire)
+    } | {
+        event.start_line for event in block.events if isinstance(event, Scoped)
+    }
+    for event in block.events:
+        if not isinstance(event, CallSite) or not event.may_raise:
+            continue
+        method = event.callee.rsplit(".", 1)[-1]
+        if event.line in acquire_lines or method == "read":
+            return True
+    return False
+
+
+def _relevant_exits(cfg: CFG) -> list[int]:
+    """Exclude synthetic exception exits caused only by safe/acquire calls."""
+
+    exits: list[int] = []
+    for exit_block in cfg.exits:
+        if cfg.blocks[exit_block].kind != "exception_exit":
+            exits.append(exit_block)
+            continue
+        if any(not _ignorable_exception_edge(cfg, pred) for pred in cfg.preds(exit_block)):
+            exits.append(exit_block)
+    return exits
+
+
 def check_exits(
     cfg: CFG, outbound: Mapping[int, dict[str, State]], acquisitions: Mapping[str, tuple[int, Acquire]] | None = None
 ) -> list[LeakCandidate]:
     acquisitions = acquisitions or _acquire_blocks(cfg)
     candidates: list[LeakCandidate] = []
     for exit_block in cfg.exits:
+        # Exception exits join state from every raising call.  Inspect the
+        # incoming edge separately so an ignored acquisition edge cannot make
+        # an otherwise closed resource appear MAYBE_OPEN at the shared exit.
+        if cfg.blocks[exit_block].kind == "exception_exit":
+            for predecessor in cfg.preds(exit_block):
+                if _ignorable_exception_edge(cfg, predecessor):
+                    continue
+                for var, state in outbound[predecessor].items():
+                    if state in (State.OPEN, State.MAYBE_OPEN) and var in acquisitions:
+                        path = bfs_path(cfg, acquisitions[var][0], predecessor)
+                        if path:
+                            path.append(exit_block)
+                        candidates.append(
+                            LeakCandidate(var, exit_block, state, "exception", path)
+                        )
+            continue
         for var, state in outbound[exit_block].items():
             if state in (State.OPEN, State.MAYBE_OPEN) and var in acquisitions:
                 candidates.append(
@@ -225,6 +291,39 @@ def _path_steps(cfg: CFG, path: list[int], acquire: Acquire, var: str) -> list[P
     return steps
 
 
+def _path_line(cfg: CFG, path: list[int], fallback: int) -> int:
+    """Find the source line of a leaking exit rather than exposing a block id."""
+
+    for block_id in reversed(path):
+        block = cfg.blocks[block_id]
+        if block.line_end:
+            return block.line_end
+        if block.line_start:
+            return block.line_start
+    return fallback
+
+
+def _possible_escape_finding(
+    cfg: CFG, acquire: Acquire, var: str, ordinal: int, escape: Escape
+) -> Finding:
+    return Finding(
+        confidence=Confidence.POSSIBLE,
+        resource=acquire.resource,
+        file=cfg.file,
+        function=cfg.func_name,
+        variable=var,
+        acquired_line=acquire.line,
+        acquired_col=acquire.col,
+        snippet=acquire.snippet,
+        leak_path=[PathStep(acquire.line, f"{var} opened here"), PathStep(escape.line, "ownership passed to an unresolved call")],
+        exit_kind="fallthrough",
+        reason=f"{var} may escape through unresolved call {escape.target or '<dynamic>'}",
+        severity="info",
+        ordinal=ordinal,
+        escape_kind=escape.kind,
+    )
+
+
 def analyze_cfg(cfg: CFG, summaries: Mapping[str, Summary] | None = None) -> list[Finding]:
     """Turn one P1 CFG into stable P2 findings.
 
@@ -243,21 +342,46 @@ def analyze_cfg(cfg: CFG, summaries: Mapping[str, Summary] | None = None) -> lis
         ]
     acquisitions = _acquire_blocks(cfg)
     candidates = check_exits(cfg, outbound, acquisitions)
+    relevant_exits = _relevant_exits(cfg)
     events = _all_events(cfg)
     findings: list[Finding] = []
     for ordinal, (var, (_, acquire)) in enumerate(acquisitions.items()):
         escaped = [event for event in events if isinstance(event, Escape) and event.var == var]
         if escaped:
+            unresolved = next(
+                (
+                    event for event in escaped
+                    if event.kind == "call_arg" and event.target not in (summaries or {})
+                ),
+                None,
+            )
+            if unresolved and not unresolved.var.startswith("<arg"):
+                findings.append(_possible_escape_finding(cfg, acquire, var, ordinal, unresolved))
             continue
         var_candidates = [candidate for candidate in candidates if candidate.var == var]
-        confidence = score(
-            [candidate.__dict__ for candidate in var_candidates], cfg.exits, escaped_anywhere=bool(escaped)
+        if not var_candidates:
+            continue
+        primary = min(
+            var_candidates,
+            key=lambda candidate: {"return": 0, "fallthrough": 1, "exception": 2}.get(candidate.exit_kind, 3),
         )
+        confidence = score(
+            [candidate.__dict__ for candidate in var_candidates], relevant_exits, escaped_anywhere=bool(escaped)
+        )
+        # The independently-owned resource in a ``with`` body is still a
+        # useful finding, but teardown ordering of user-defined context
+        # managers is not modelled.  Keep it visible without turning that
+        # corner case into a default CI block.
+        if (
+            confidence is Confidence.DEFINITE
+            and primary.exit_kind == "return"
+            and any(isinstance(event, Scoped) for event in events)
+        ):
+            confidence = Confidence.LIKELY
         if confidence is Confidence.SAFE:
             continue
-        primary = var_candidates[0]
         close_lines = [event.line for event in events if isinstance(event, Release) and event.var == var]
-        unreachable = primary.path[-1] if primary.path else None
+        unreachable = _path_line(cfg, primary.path, acquire.line)
         reason = f"reaches {primary.exit_kind} exit with {var} still open"
         if close_lines:
             reason += f"; close() at line {close_lines[0]} is unreachable on this path"
