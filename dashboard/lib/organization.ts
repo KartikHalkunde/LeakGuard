@@ -6,7 +6,8 @@ export interface EmployeeRisk {
   definite: number; likely: number; possible: number; repeats: number; topResource: string; repositories: EmployeeRepositoryPerformance[];
 }
 export interface RepositoryMember { login: string; checks: number; cleanRate: number; errors: number; blocked: number }
-export interface RepositoryRisk { name: string; language: string; open: number; blockedPrs: number; scans: number; risk: "critical" | "high" | "low"; members: RepositoryMember[] }
+export interface RepositoryTeam { name: string; lead: string; members: string[]; cleanRate: number; open: number; blocked: number }
+export interface RepositoryRisk { name: string; language: string; open: number; blockedPrs: number; scans: number; risk: "critical" | "high" | "low"; members: RepositoryMember[]; teams: RepositoryTeam[] }
 export interface Incident {
   id: string; employee: string; repository: string; branch: string; pr: number; file: string; resource: string;
   confidence: "definite" | "likely" | "possible"; status: "open" | "fixed"; gate: GateStatus; detectedAt: string;
@@ -30,9 +31,9 @@ export const organizationSnapshot: OrganizationSnapshot = {
     { login: "dev-meera", name: "Meera", avatar: "M", scans: 8, blocked: 1, open: 6, fixed: 4, fixRate: 40, cleanRate: 38, avgFixHours: 8.1, score: 48, scoreDelta: -8, cleanRateDelta: -12, definite: 3, likely: 2, possible: 1, repeats: 2, topResource: "DB connections", repositories: [{ repository: "payments-api", checks: 7, cleanRate: 29, errors: 6, blocked: 1 }, { repository: "data-workers", checks: 1, cleanRate: 100, errors: 0, blocked: 0 }] },
   ],
   repositories: [
-    { name: "payments-api", language: "Python", open: 7, blockedPrs: 2, scans: 19, risk: "critical", members: [{ login: "nikita20", checks: 9, cleanRate: 78, errors: 2, blocked: 1 }, { login: "dev-arjun", checks: 3, cleanRate: 67, errors: 0, blocked: 0 }, { login: "dev-meera", checks: 7, cleanRate: 29, errors: 6, blocked: 1 }] },
-    { name: "data-workers", language: "Python", open: 4, blockedPrs: 1, scans: 16, risk: "high", members: [{ login: "kartik-h", checks: 5, cleanRate: 80, errors: 1, blocked: 0 }, { login: "dev-arjun", checks: 8, cleanRate: 63, errors: 3, blocked: 1 }, { login: "dev-meera", checks: 1, cleanRate: 100, errors: 0, blocked: 0 }] },
-    { name: "customer-portal", language: "Python", open: 1, blockedPrs: 0, scans: 12, risk: "low", members: [{ login: "nikita20", checks: 6, cleanRate: 83, errors: 0, blocked: 0 }, { login: "kartik-h", checks: 8, cleanRate: 100, errors: 0, blocked: 0 }] },
+    { name: "payments-api", language: "Python", open: 7, blockedPrs: 2, scans: 19, risk: "critical", members: [{ login: "nikita20", checks: 9, cleanRate: 78, errors: 2, blocked: 1 }, { login: "dev-arjun", checks: 3, cleanRate: 67, errors: 0, blocked: 0 }, { login: "dev-meera", checks: 7, cleanRate: 29, errors: 6, blocked: 1 }], teams: [{ name: "Payments Platform", lead: "nikita20", members: ["nikita20", "dev-meera"], cleanRate: 57, open: 7, blocked: 2 }, { name: "API Reliability", lead: "dev-arjun", members: ["dev-arjun"], cleanRate: 67, open: 0, blocked: 0 }] },
+    { name: "data-workers", language: "Python", open: 4, blockedPrs: 1, scans: 16, risk: "high", members: [{ login: "kartik-h", checks: 5, cleanRate: 80, errors: 1, blocked: 0 }, { login: "dev-arjun", checks: 8, cleanRate: 63, errors: 3, blocked: 1 }, { login: "dev-meera", checks: 1, cleanRate: 100, errors: 0, blocked: 0 }], teams: [{ name: "Data Processing", lead: "kartik-h", members: ["kartik-h", "dev-arjun"], cleanRate: 70, open: 4, blocked: 1 }, { name: "Data Quality", lead: "dev-meera", members: ["dev-meera"], cleanRate: 100, open: 0, blocked: 0 }] },
+    { name: "customer-portal", language: "Python", open: 1, blockedPrs: 0, scans: 12, risk: "low", members: [{ login: "nikita20", checks: 6, cleanRate: 83, errors: 0, blocked: 0 }, { login: "kartik-h", checks: 8, cleanRate: 100, errors: 0, blocked: 0 }], teams: [{ name: "Customer Experience", lead: "kartik-h", members: ["kartik-h", "nikita20"], cleanRate: 92, open: 1, blocked: 0 }] },
   ],
   incidents: [
     { id: "LG-1042", employee: "dev-meera", repository: "payments-api", branch: "feat/refunds", pr: 84, file: "app/refunds.py:42", resource: "sqlite3.Connection", confidence: "definite", status: "open", gate: "blocked", detectedAt: "8 min ago", reason: "Early return at line 47 exits while conn is still open; close() at line 53 is unreachable on this path.", leakPath: ["L42 connection opened", "L46 refund not found", "L47 early return", "Exit with connection open"] },

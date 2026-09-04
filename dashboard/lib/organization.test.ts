@@ -39,4 +39,12 @@ describe("organization snapshot", () => {
     expect(today.fixed).toBeGreaterThanOrEqual(today.opened);
     expect(today.accuracy).toBeGreaterThan(0);
   });
+
+  it("groups repository contributors into accountable teams", () => {
+    const employees = new Set(organizationSnapshot.employees.map((employee) => employee.login));
+    expect(organizationSnapshot.repositories.every((repository) => repository.teams.length > 0)).toBe(true);
+    expect(organizationSnapshot.repositories.every((repository) => repository.teams.every((team) =>
+      employees.has(team.lead) && team.members.every((login) => employees.has(login))
+    ))).toBe(true);
+  });
 });
