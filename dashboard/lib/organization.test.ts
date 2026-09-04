@@ -19,4 +19,11 @@ describe("organization snapshot", () => {
     expect(blocked.length).toBe(organizationSnapshot.metrics.blockedPrs);
     expect(blocked.every((incident) => incident.pr > 0 && incident.employee && incident.branch)).toBe(true);
   });
+
+  it("keeps repository membership linked to known employees", () => {
+    const employees = new Set(organizationSnapshot.employees.map((employee) => employee.login));
+    const repositories = new Set(organizationSnapshot.repositories.map((repository) => repository.name));
+    expect(organizationSnapshot.repositories.every((repository) => repository.members.every((member) => employees.has(member.login)))).toBe(true);
+    expect(organizationSnapshot.employees.every((employee) => employee.repositories.every((repository) => repositories.has(repository.repository)))).toBe(true);
+  });
 });
