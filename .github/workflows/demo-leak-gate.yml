@@ -1,0 +1,30 @@
+name: Demo Leak Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, nikita]
+    paths:
+      - "demo-repo/**"
+      - ".github/workflows/demo-leak-gate.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "demo-repo/**"
+      - ".github/workflows/demo-leak-gate.yml"
+
+jobs:
+  leakguard:
+    name: Block intentionally leaky demo
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run LeakGuard gate against demo application
+        uses: ./
+        with:
+          paths: demo-repo/app
+          fail-on: likely
+          diff-only: "false"
+          upload-sarif: "false"

@@ -54,6 +54,9 @@ fixtures and labels non-live history.
 - VS Code scans Python files on open/save and exposes a manual scan command.
 - pre-commit scans staged Python files when `git commit` runs after installation.
 - GitHub Actions scans on pull requests and configured branch pushes.
+- The root **Demo Leak Gate** scans `demo-repo/app` separately and is expected
+  to fail red because those ten leaks are intentional. The analyzer self-scan
+  covers only production code under `leakguard/`.
 - The dashboard scans only when **Scan now** is pressed; otherwise it reads the
   latest `leakguard.json` and never executes arbitrary user-provided paths.
 

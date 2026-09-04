@@ -86,10 +86,8 @@ jobs:
         run: npm ci && npm test && npm run build
 
   self-scan:
-    # LeakGuard scanning LeakGuard. Kept non-blocking because this job reports
-    # product findings; the test job above enforces tool correctness.
+    name: Analyzer self-scan (leakguard source only)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
