@@ -1,0 +1,39 @@
+{
+  "name": "leakguard-vscode",
+  "displayName": "LeakGuard",
+  "description": "Path-aware Python resource leak diagnostics and verified quick fixes.",
+  "version": "0.1.0",
+  "publisher": "leakguard",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Linters"],
+  "activationEvents": ["onLanguage:python", "onCommand:leakguard.fix", "onCommand:leakguard.scan"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "leakguard.scan", "title": "LeakGuard: Scan Current File" },
+      { "command": "leakguard.fix", "title": "LeakGuard: Apply Verified Fix" }
+    ],
+    "configuration": {
+      "title": "LeakGuard",
+      "properties": {
+        "leakguard.path": {
+          "type": "string",
+          "default": "leakguard",
+          "description": "Path to the LeakGuard executable."
+        },
+        "leakguard.scanOnOpen": { "type": "boolean", "default": true },
+        "leakguard.scanOnSave": { "type": "boolean", "default": true }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test out/test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.7.0"
+  }
+}

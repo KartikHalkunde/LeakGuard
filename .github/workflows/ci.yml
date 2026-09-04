@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, P1, P2, P3, P4]
+    branches: [main, nikita, P1, P2, P3, P4]
   pull_request:
     branches: [main]
 
@@ -66,8 +66,28 @@ jobs:
           leakguard baseline . > /dev/null
           leakguard check . --fail-on definite
 
+  interfaces:
+    name: Interfaces (VS Code + dashboard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            integrations/vscode/package-lock.json
+            dashboard/package-lock.json
+      - name: Test VS Code extension
+        working-directory: integrations/vscode
+        run: npm ci && npm test
+      - name: Test dashboard
+        working-directory: dashboard
+        run: npm ci && npm test && npm run build
+
   self-scan:
-    # LeakGuard scanning LeakGuard. Non-blocking while the engine is stubbed.
+    # LeakGuard scanning LeakGuard. Kept non-blocking because this job reports
+    # product findings; the test job above enforces tool correctness.
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
