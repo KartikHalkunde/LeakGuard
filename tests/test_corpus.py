@@ -22,42 +22,17 @@ hold even against the stub.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
 
 from leakguard import analyze
+from leakguard.bench import expectations
 from leakguard.config import Config
 from leakguard.engine import engine_available
 
 CORPUS_ROOT = Path(__file__).parent / "corpus"
 ENGINE_WIRED = engine_available()
-
-DIRECTIVE = re.compile(
-    r"#\s*EXPECT:\s*(CLEAN|LEAK)(?:\s+var=(\S+))?"
-    r"(?:\s+line=(\d+))?(?:\s+confidence=(\w+))?"
-)
-
-
-def expectations(path: Path) -> list[dict]:
-    """Parse the # EXPECT: header(s) at the top of a corpus file."""
-    out: list[dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        m = DIRECTIVE.match(line.strip())
-        if not m:
-            continue
-        kind, var, line_no, conf = m.groups()
-        if kind == "CLEAN":
-            return []
-        out.append(
-            {
-                "var": var,
-                "line": int(line_no) if line_no else None,
-                "confidence": conf,
-            }
-        )
-    return out
 
 
 def corpus_files() -> list[Path]:

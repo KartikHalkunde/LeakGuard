@@ -119,7 +119,11 @@ def test_missing_path_does_not_crash():
     assert main(["check", "does/not/exist.py", "--no-baseline"]) == EXIT_OK
 
 
-def test_unimplemented_subcommands_exit_two():
-    """Delegated commands must report cleanly, not traceback."""
-    assert main(["bench"]) == EXIT_ERROR
+def test_bench_runs_the_real_corpus():
+    """P4's leakguard/bench.py landed - bench must report, not stub out."""
+    assert main(["bench"]) == EXIT_OK
+
+
+def test_explain_on_missing_file_reports_cleanly():
+    """Delegated commands must report cleanly, not traceback, on bad input."""
     assert main(["explain", "a.py:f"]) == EXIT_ERROR
