@@ -17,7 +17,6 @@ from pathlib import Path
 
 from leakguard import analyze
 from leakguard.config import Config
-from leakguard.engine import engine_available
 
 DIRECTIVE = re.compile(
     r"#\s*EXPECT:\s*(CLEAN|LEAK)(?:\s+var=(\S+))?"
@@ -71,12 +70,6 @@ def run_bench(corpus_root: Path) -> int:
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
 
     print(_format_report(tp, fp, tn, fn, precision, recall, f1))
-
-    if not engine_available():
-        print(
-            "leakguard: WARNING - analysis engine not wired up yet; "
-            "results are stub data (see leakguard/engine.py)"
-        )
 
     _write_doc(tp, fp, tn, fn, precision, recall, f1, rows)
     return 0

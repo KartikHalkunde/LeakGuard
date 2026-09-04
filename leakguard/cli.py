@@ -28,7 +28,7 @@ from leakguard import gitutil
 from leakguard.baseline.store import Baseline
 from leakguard.config import Config, load_config, merge_cli
 from leakguard.core.finding import ORDER, Finding
-from leakguard.engine import analyze, engine_available
+from leakguard.engine import analyze
 from leakguard.report import json as json_report
 from leakguard.report import sarif as sarif_report
 from leakguard.report import text as text_report
@@ -178,13 +178,6 @@ def cmd_check(args) -> int:
         Path(args.output).write_text(output + "\n", encoding="utf-8")
     else:
         print(output)
-
-    if not engine_available():
-        print(
-            "leakguard: WARNING - analysis engine not wired up yet; "
-            "results are stub data (see leakguard/engine.py)",
-            file=sys.stderr,
-        )
 
     return _exit_code(findings, cfg.fail_on)
 

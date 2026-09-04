@@ -33,13 +33,10 @@ jobs:
           leakguard --version
           leakguard check --help > /dev/null
 
-          # Build fixtures rather than asserting against our own source tree:
-          # a smoke test that depends on the repo happening to be clean breaks
-          # the moment anyone adds a marker string anywhere.
+          # Build isolated fixtures rather than asserting against the repository.
           mkdir -p /tmp/smoke
-          MARKER="# LEAKGUARD_""STUB_LEAK"
-          printf 'import sqlite3\n\n\ndef f():\n    conn = sqlite3.connect("db")  %s\n    return None\n' \
-            "$MARKER" > /tmp/smoke/leaky.py
+          printf 'import sqlite3\n\n\ndef f():\n    conn = sqlite3.connect("db")\n    return None\n' \
+            > /tmp/smoke/leaky.py
           printf 'def f(p):\n    with open(p) as fh:\n        return fh.read()\n' \
             > /tmp/smoke/clean.py
 
