@@ -105,3 +105,15 @@ test("flags a repository that is not the workspace itself", async () => {
     await fs.rm(repo, { recursive: true, force: true });
   }
 });
+
+test("does not block the commit on a tool error (exit 2)", async () => {
+  const repo = await tempRepo();
+  try {
+    await install(repo);
+    const body = await fs.readFile(path.join(repo, ".git", "hooks", "pre-commit"), "utf8");
+    assert.ok(body.includes('-eq 2'), "must special-case the tool-error exit code");
+    assert.ok(/exit \$code/.test(body), "must otherwise pass the analyzer's exit code through");
+  } finally {
+    await fs.rm(repo, { recursive: true, force: true });
+  }
+});

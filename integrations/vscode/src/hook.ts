@@ -16,11 +16,22 @@ const MARKER = "# installed by the LeakGuard VS Code extension";
 function hookBody(failOn: string): string {
   // Staged files only: a hook that scans the whole repo gets --no-verify'd
   // within a week.
+  //
+  // Exit 2 means the analyzer itself failed - an unparseable file, a bad
+  // config. That must not cancel the commit: fail closed on findings, fail
+  // open on ourselves. A gate that blocks on syntax it cannot read gets
+  // uninstalled the same afternoon.
   return `#!/bin/sh
 ${MARKER}
 files=$(git diff --cached --name-only --diff-filter=ACM | grep '\\.py$')
 [ -z "$files" ] && exit 0
 leakguard check $files --fail-on ${failOn}
+code=$?
+if [ "$code" -eq 2 ]; then
+  echo "leakguard: tool error - commit allowed" >&2
+  exit 0
+fi
+exit $code
 `;
 }
 

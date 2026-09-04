@@ -44,7 +44,7 @@
       { "command": "leakguard.scanWorkspace", "title": "Scan Workspace", "category": "LeakGuard", "icon": "$(search)" },
       { "command": "leakguard.fix", "title": "Apply Verified Fix", "category": "LeakGuard", "icon": "$(wand)" },
       { "command": "leakguard.aiFix", "title": "Suggest a Fix with AI", "category": "LeakGuard", "icon": "$(sparkle)" },
-      { "command": "leakguard.fixAll", "title": "Apply All Verified Fixes", "category": "LeakGuard", "icon": "$(check-all)" },
+      { "command": "leakguard.fixAll", "title": "Fix Whole Project", "category": "LeakGuard", "icon": "$(check-all)" },
       { "command": "leakguard.enableProtection", "title": "Enable Commit Protection", "category": "LeakGuard", "icon": "$(shield)" },
       { "command": "leakguard.disableProtection", "title": "Disable Commit Protection", "category": "LeakGuard" },
       { "command": "leakguard.commit", "title": "Commit Changes", "category": "LeakGuard", "icon": "$(git-commit)" },

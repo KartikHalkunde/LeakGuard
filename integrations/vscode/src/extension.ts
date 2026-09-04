@@ -147,7 +147,7 @@ async function scanWorkspace(): Promise<void> {
 // --------------------------------------------------------------------------
 
 /** Deterministic fix - the rewriter proves the shape before it writes. */
-async function applyVerifiedFix(uri: vscode.Uri): Promise<boolean> {
+async function applyVerifiedFix(uri: vscode.Uri, quiet = false): Promise<boolean> {
   const document = await vscode.workspace.openTextDocument(uri);
   await document.save();
   try {
@@ -156,11 +156,74 @@ async function applyVerifiedFix(uri: vscode.Uri): Promise<boolean> {
     await scan(fresh);
     return true;
   } catch (error) {
-    void vscode.window.showErrorMessage(
-      `LeakGuard fix failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    if (!quiet) {
+      void vscode.window.showErrorMessage(
+        `LeakGuard fix failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     return false;
   }
+}
+
+/**
+ * Fix every file at once.
+ *
+ * This rewrites source across the workspace, so it confirms first and names
+ * the exact count. Running the equivalent CLI command against a directory by
+ * accident is how a seeded test corpus gets silently "fixed" into passing.
+ */
+async function fixWholeProject(): Promise<void> {
+  const root = workspaceRoot();
+  if (!root) {
+    void vscode.window.showWarningMessage("LeakGuard: open a folder first - there is nothing to fix.");
+    return;
+  }
+
+  if (!findingsByUri.size) await scanWorkspace();
+
+  const targets = [...findingsByUri.entries()]
+    .filter(([, findings]) => findings.some((finding) => finding.fix_available))
+    .map(([key]) => vscode.Uri.parse(key));
+
+  if (!targets.length) {
+    void vscode.window.showInformationMessage(
+      "LeakGuard: nothing to fix automatically. Remaining findings need the AI suggestion or a manual change.",
+    );
+    return;
+  }
+
+  const fixable = [...findingsByUri.values()]
+    .flat()
+    .filter((finding) => finding.fix_available).length;
+
+  const choice = await vscode.window.showWarningMessage(
+    `Rewrite ${fixable} leak(s) across ${targets.length} file(s)?`,
+    { modal: true, detail: "Each rewrite is re-analysed and kept only if the leak is provably gone. Commit or stash first if you want an easy way back." },
+    "Fix all",
+  );
+  if (choice !== "Fix all") return;
+
+  let changed = 0;
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: "LeakGuard: applying verified fixes", cancellable: false },
+    async (progress) => {
+      for (const [index, uri] of targets.entries()) {
+        progress.report({
+          message: `${vscode.workspace.asRelativePath(uri)} (${index + 1}/${targets.length})`,
+          increment: 100 / targets.length,
+        });
+        if (await applyVerifiedFix(uri, true)) changed += 1;
+      }
+    },
+  );
+
+  await scanWorkspace();
+  const left = panel.total;
+  void vscode.window.showInformationMessage(
+    left
+      ? `LeakGuard: fixed ${changed} file(s). ${left} finding(s) remain - those need the AI suggestion or a manual change.`
+      : `LeakGuard: fixed ${changed} file(s). No leaks remain.`,
+  );
 }
 
 /**
@@ -415,11 +478,7 @@ function activateInner(context: vscode.ExtensionContext): void {
       if (target instanceof vscode.Uri && finding) return applyAiFix(target, finding);
       if (target instanceof FindingNode) return applyAiFix(target.uri, target.finding);
     }),
-    vscode.commands.registerCommand("leakguard.fixAll", async () => {
-      const uris = [...findingsByUri.keys()].map((key) => vscode.Uri.parse(key));
-      for (const uri of uris) await applyVerifiedFix(uri);
-      void vscode.window.showInformationMessage(`LeakGuard: applied verified fixes across ${uris.length} file(s).`);
-    }),
+    vscode.commands.registerCommand("leakguard.fixAll", () => void fixWholeProject()),
 
     vscode.commands.registerCommand("leakguard.enableProtection", () => void enableProtection()),
     vscode.commands.registerCommand("leakguard.disableProtection", async () => {
