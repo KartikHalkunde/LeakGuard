@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from leakguard.core.cfg import CFG
 from leakguard.core.ir import Acquire, Alias, CallSite, Escape, Release, Scoped
+from pathlib import Path
 
 
 def summarize(events: list[object]) -> str:
@@ -32,3 +33,11 @@ def to_mermaid(cfg: CFG, leak_path: list[int]) -> str:
         if bid in cfg.blocks: lines.append(f"    style B{bid} fill:#ff6b6b,stroke:#c92a2a")
     return "\n".join(lines)
 
+
+def explain(path: Path, function_name: str) -> str:
+    """Build and render one function, highlighting its first leaking path."""
+    from leakguard.core.pipeline import cfg_for_function
+
+    cfg, findings = cfg_for_function(path, function_name)
+    leak_path = findings[0].block_path if findings else []
+    return to_mermaid(cfg, leak_path)

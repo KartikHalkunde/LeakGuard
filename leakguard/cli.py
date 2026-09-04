@@ -256,7 +256,11 @@ def cmd_explain(args) -> int:
         print("leakguard: target must be FILE:FUNCTION", file=sys.stderr)
         return EXIT_ERROR
     file_part, func = args.target.rsplit(":", 1)
-    print(explain(Path(file_part), func))
+    try:
+        print(explain(Path(file_part), func))
+    except (OSError, ValueError, SyntaxError) as error:
+        print(f"leakguard: {error}", file=sys.stderr)
+        return EXIT_ERROR
     return EXIT_OK
 
 

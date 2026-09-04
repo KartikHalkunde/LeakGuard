@@ -188,12 +188,33 @@ def _exit_kind(cfg: CFG, exit_block: int) -> str:
     return cfg.edge_kind(predecessors[0], exit_block) or "fallthrough"
 
 
+def _acquisition_failure_only(cfg: CFG, exit_block: int) -> bool:
+    if cfg.blocks[exit_block].kind != "exception_exit":
+        return False
+    predecessors = cfg.preds(exit_block)
+    if not predecessors:
+        return False
+    for predecessor in predecessors:
+        normal_successors = [
+            edge.dst for edge in cfg.edges
+            if edge.src == predecessor and edge.kind == "normal"
+        ]
+        if not any(
+            any(isinstance(event, Acquire) for event in cfg.blocks[successor].events)
+            for successor in normal_successors
+        ):
+            return False
+    return True
+
+
 def check_exits(
     cfg: CFG, outbound: Mapping[int, dict[str, State]], acquisitions: Mapping[str, tuple[int, Acquire]] | None = None
 ) -> list[LeakCandidate]:
     acquisitions = acquisitions or _acquire_blocks(cfg)
     candidates: list[LeakCandidate] = []
     for exit_block in cfg.exits:
+        if _acquisition_failure_only(cfg, exit_block):
+            continue
         for var, state in outbound[exit_block].items():
             if state in (State.OPEN, State.MAYBE_OPEN) and var in acquisitions:
                 candidates.append(
@@ -241,24 +262,49 @@ def analyze_cfg(cfg: CFG, summaries: Mapping[str, Summary] | None = None) -> lis
                 reason=str(error), severity="info",
             )
         ]
+    summaries = summaries or {}
     acquisitions = _acquire_blocks(cfg)
     candidates = check_exits(cfg, outbound, acquisitions)
     events = _all_events(cfg)
     findings: list[Finding] = []
     for ordinal, (var, (_, acquire)) in enumerate(acquisitions.items()):
         escaped = [event for event in events if isinstance(event, Escape) and event.var == var]
-        if escaped:
+        effective_escapes = [
+            event for event in escaped
+            if not (
+                event.kind == "call_arg"
+                and event.target in summaries
+                and summaries[event.target].closes_arg
+            )
+        ]
+        ownership_escapes = [event for event in effective_escapes if event.kind != "call_arg"]
+        if ownership_escapes:
             continue
         var_candidates = [candidate for candidate in candidates if candidate.var == var]
+        reachable_exits = [
+            exit_id for exit_id in cfg.exits
+            if (cfg.preds(exit_id) or exit_id == cfg.entry) and not _acquisition_failure_only(cfg, exit_id)
+        ]
         confidence = score(
-            [candidate.__dict__ for candidate in var_candidates], cfg.exits, escaped_anywhere=bool(escaped)
+            [candidate.__dict__ for candidate in var_candidates],
+            reachable_exits,
+            escaped_anywhere=bool(effective_escapes),
         )
         if confidence is Confidence.SAFE:
             continue
-        primary = var_candidates[0]
+        primary = var_candidates[0] if var_candidates else None
         close_lines = [event.line for event in events if isinstance(event, Release) and event.var == var]
-        unreachable = primary.path[-1] if primary.path else None
-        reason = f"reaches {primary.exit_kind} exit with {var} still open"
+        unreachable = None
+        if primary and primary.path:
+            witness_block = cfg.blocks[primary.path[-2] if len(primary.path) > 1 else primary.path[-1]]
+            unreachable = witness_block.line_end or witness_block.line_start or acquire.line
+        escape = effective_escapes[0] if effective_escapes else None
+        exit_kind = primary.exit_kind if primary else "escape"
+        block_path = primary.path if primary else [acquisitions[var][0]]
+        reason = (
+            f"ownership of {var} passes to unresolved call {escape.target}"
+            if escape else f"reaches {exit_kind} exit with {var} still open"
+        )
         if close_lines:
             reason += f"; close() at line {close_lines[0]} is unreachable on this path"
         findings.append(
@@ -271,15 +317,95 @@ def analyze_cfg(cfg: CFG, summaries: Mapping[str, Summary] | None = None) -> lis
                 acquired_line=acquire.line,
                 acquired_col=acquire.col,
                 snippet=acquire.snippet,
-                leak_path=_path_steps(cfg, primary.path, acquire, var),
+                leak_path=_path_steps(cfg, block_path, acquire, var),
                 close_found_at=close_lines,
                 close_unreachable_from=unreachable,
-                exit_kind=primary.exit_kind,
+                exit_kind=exit_kind,
                 reason=reason,
-                fix_available=bool(close_lines),
+                fix_available=confidence in {Confidence.DEFINITE, Confidence.LIKELY},
                 severity="high" if confidence is Confidence.DEFINITE else "medium",
                 ordinal=ordinal,
-                block_path=primary.path,
+                escape_kind=escape.kind if escape else None,
+                block_path=block_path,
             )
         )
+    # Reassigning an open variable loses the previous handle even if the final
+    # handle is later closed. Represent that lost generation as a finding.
+    by_var: dict[str, list[tuple[int, Acquire]]] = defaultdict(list)
+    for block_id, block in cfg.blocks.items():
+        for event in block.events:
+            if isinstance(event, Acquire):
+                by_var[event.var].append((block_id, event))
+    for var, generations in by_var.items():
+        for position, (block_id, acquire) in enumerate(generations[:-1]):
+            next_block, next_acquire = generations[position + 1]
+            path_between = bfs_path(cfg, block_id, next_block)
+            if not path_between:
+                continue
+            released_between = False
+            for path_block in path_between:
+                block_events = cfg.blocks[path_block].events
+                start = block_events.index(acquire) + 1 if path_block == block_id and acquire in block_events else 0
+                end = block_events.index(next_acquire) if path_block == next_block and next_acquire in block_events else len(block_events)
+                if any(isinstance(event, Release) and event.var == var for event in block_events[start:end]):
+                    released_between = True
+            if released_between:
+                continue
+            if any(f.variable == var and f.acquired_line == acquire.line for f in findings):
+                continue
+            findings.append(Finding(
+                confidence=Confidence.DEFINITE,
+                resource=acquire.resource,
+                file=cfg.file,
+                function=cfg.func_name,
+                variable=var,
+                acquired_line=acquire.line,
+                acquired_col=acquire.col,
+                snippet=acquire.snippet,
+                leak_path=[PathStep(acquire.line, f"{var} opened here"),
+                           PathStep(next_acquire.line, f"{var} overwritten before close")],
+                exit_kind="overwrite",
+                reason=f"{var} is overwritten while its previous resource is still open",
+                severity="high",
+                ordinal=len(findings),
+                block_path=[block_id],
+            ))
+        # A loop-body acquisition without a loop-body release overwrites the
+        # previous iteration's live handle. A close after the loop closes only
+        # the final generation.
+        for block_id, acquire in generations:
+            block = cfg.blocks[block_id]
+            if any(isinstance(event, Escape) and event.var == var for event in events):
+                continue
+            if any(isinstance(event, Release) and event.var == var for event in block.events):
+                continue
+            seen: set[int] = set()
+            queue = deque(cfg.succs(block_id))
+            cyclic = False
+            while queue:
+                current = queue.popleft()
+                if current == block_id:
+                    cyclic = True
+                    break
+                if current not in seen:
+                    seen.add(current)
+                    queue.extend(cfg.succs(current))
+            if not cyclic or any(f.variable == var and f.acquired_line == acquire.line for f in findings):
+                continue
+            findings.append(Finding(
+                confidence=Confidence.LIKELY,
+                resource=acquire.resource,
+                file=cfg.file,
+                function=cfg.func_name,
+                variable=var,
+                acquired_line=acquire.line,
+                acquired_col=acquire.col,
+                snippet=acquire.snippet,
+                leak_path=[PathStep(acquire.line, f"{var} reopened on each loop iteration")],
+                exit_kind="loop",
+                reason=f"{var} is acquired repeatedly in a loop but not released in the loop body",
+                severity="medium",
+                ordinal=len(findings),
+                block_path=[block_id],
+            ))
     return findings

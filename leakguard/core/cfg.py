@@ -43,7 +43,7 @@ class CFG:
 
 
 class ResourceCatalog(Protocol):
-    def match_acquire(self, node: ast.AST) -> str | None: ...
+    def match_acquire(self, node: ast.AST | str | None) -> str | None: ...
 
     def is_release(self, resource: str, method: str) -> bool: ...
 
@@ -88,7 +88,8 @@ class DefaultCatalog:
 
 
 SAFE_CALLS = {"len", "str", "int", "float", "bool", "isinstance", "print", "append", "add",
-              "get", "keys", "values", "items", "range", "enumerate"}
+              "get", "keys", "values", "items", "range", "enumerate", "read", "close",
+              "shutdown", "release", "terminate", "kill"}
 
 
 class CFGBuilder(ast.NodeVisitor):
@@ -103,6 +104,9 @@ class CFGBuilder(ast.NodeVisitor):
         self.handler_stack: list[int | None] = []
         self.finally_stack: list[int] = []
         self.tracked: dict[str, str] = {}
+        self.scoped: set[str] = set()
+        args = func.args
+        self.parameters = {a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
         self.globals: set[str] = set()
         self.entry = self.new_block("entry")
         self.cur: int | None = self.entry
@@ -150,6 +154,16 @@ class CFGBuilder(ast.NodeVisitor):
     def _snippet(self, node: ast.AST) -> str:
         return ast.get_source_segment(self.source, node) or "..."
 
+    def _match_acquire(self, node: ast.AST) -> str | None:
+        """Support both the AST-oriented test catalog and dotted-name catalog."""
+        if not isinstance(node, ast.Call):
+            return None
+        name = self._resolve(dotted(node.func))
+        try:
+            return self.catalog.match_acquire(node)
+        except (AttributeError, TypeError):
+            return self.catalog.match_acquire(name)
+
     def _names(self, nodes: list[ast.AST]) -> tuple[str, ...]:
         return tuple(n.id for n in nodes if isinstance(n, ast.Name))
 
@@ -171,12 +185,16 @@ class CFGBuilder(ast.NodeVisitor):
                 if var in self.tracked:
                     self.emit(Escape(var, kind, node.lineno, callee))
             for index, arg in enumerate(node.args):
-                resource = self.catalog.match_acquire(arg)
-                if resource:
+                resource = self._match_acquire(arg)
+                if resource and method not in {"closing", "enter_context"}:
                     temp = f"<arg{index}@{node.lineno}>"
                     self.emit(Acquire(temp, resource, node.lineno, arg.col_offset, self._snippet(arg)))
                     self.emit(Escape(temp, kind, node.lineno, callee))
-        may_raise = method not in SAFE_CALLS
+        safe_checker = getattr(self.catalog, "is_safe_call", None)
+        may_raise = method not in SAFE_CALLS and not (safe_checker and safe_checker(callee))
+        receiver = dotted(node.func.value) if isinstance(node.func, ast.Attribute) else None
+        if method in {"read", "write"} and receiver in self.scoped:
+            may_raise = True
         self.emit(CallSite(callee, args, node.lineno, may_raise))
         if may_raise and self.cur is not None:
             target = self.handler_stack[-1] if self.handler_stack else self.exception_exit
@@ -189,6 +207,14 @@ class CFGBuilder(ast.NodeVisitor):
         """Record calls in evaluation order, including calls nested in conditions."""
         if node is None or self.cur is None:
             return
+        if isinstance(node, ast.Lambda):
+            captured = {
+                child.id for child in ast.walk(node.body)
+                if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)
+            }
+            for var in captured & self.tracked.keys():
+                self.emit(Escape(var, "closure", node.lineno, "<lambda>"))
+            return
         for child in ast.iter_child_nodes(node):
             if not isinstance(child, (ast.comprehension, ast.Lambda)):
                 self.visit_expression(child)
@@ -198,7 +224,14 @@ class CFGBuilder(ast.NodeVisitor):
     def visit_Assign(self, node: ast.Assign) -> None:
         if self.cur is None:
             return
-        resource = self.catalog.match_acquire(node.value)
+        resource = self._match_acquire(node.value)
+        enter_context_resource = None
+        if isinstance(node.value, ast.Call) and dotted(node.value.func) and dotted(node.value.func).endswith("enter_context") and node.value.args:
+            enter_context_resource = self._match_acquire(node.value.args[0])
+        if resource and isinstance(node.value, ast.Call):
+            self.visit_expression(node.value)
+            if self.cur is None:
+                return
         for target in node.targets:
             if resource and isinstance(target, ast.Name):
                 self.emit(Acquire(target.id, resource, node.lineno, target.col_offset, self._snippet(node)))
@@ -211,6 +244,9 @@ class CFGBuilder(ast.NodeVisitor):
                 target_name = dotted(target) if isinstance(target, ast.Attribute) else dotted(target.value)
                 self.emit(Acquire(temp, resource, node.lineno, target.col_offset, self._snippet(node)))
                 self.emit(Escape(temp, kind, node.lineno, target_name))
+            elif enter_context_resource and isinstance(target, ast.Name):
+                self.tracked[target.id] = enter_context_resource
+                self.emit(Scoped(target.id, enter_context_resource, node.lineno, getattr(node, "end_lineno", node.lineno)))
             elif isinstance(node.value, ast.Name) and node.value.id in self.tracked:
                 src = node.value.id
                 if isinstance(target, ast.Name):
@@ -223,7 +259,8 @@ class CFGBuilder(ast.NodeVisitor):
                 elif isinstance(target, ast.Subscript):
                     self.emit(Escape(src, "container", node.lineno, dotted(target.value)))
         if isinstance(node.value, ast.Call):
-            self.visit_expression(node.value)
+            if not resource:
+                self.visit_expression(node.value)
         elif not isinstance(node.value, ast.Name):
             self.visit_expression(node.value)
 
@@ -242,13 +279,39 @@ class CFGBuilder(ast.NodeVisitor):
             call = node.value
             if isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name):
                 var, method = call.func.value.id, call.func.attr
-                if var in self.tracked and self._is_release(self.tracked[var], method):
+                if (var in self.tracked and self._is_release(self.tracked[var], method)) or (
+                    var in self.parameters and method in {"close", "shutdown", "release", "terminate", "kill"}
+                ):
                     self.emit(Release(var, node.lineno))
             self.visit_expression(call)
         elif isinstance(node.value, (ast.Yield, ast.YieldFrom)):
             value = node.value.value
             if isinstance(value, ast.Name) and value.id in self.tracked:
                 self.emit(Escape(value.id, "yield", node.lineno))
+            elif isinstance(value, ast.Call):
+                resource = self._match_acquire(value)
+                if resource:
+                    self.visit_expression(value)
+                    temp = f"<yield@{node.lineno}>"
+                    self.emit(Acquire(temp, resource, node.lineno, node.col_offset, self._snippet(value)))
+                    self.emit(Escape(temp, "yield", node.lineno))
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        if node is self.func or self.cur is None:
+            return
+        local = {arg.arg for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)}
+        stored = {
+            child.id for child in ast.walk(node)
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store)
+        }
+        loaded = {
+            child.id for child in ast.walk(node)
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)
+        }
+        for var in (loaded - local - stored) & self.tracked.keys():
+            self.emit(Escape(var, "closure", node.lineno, node.name))
+
+    visit_AsyncFunctionDef = visit_FunctionDef
 
     def visit_Global(self, node: ast.Global) -> None:
         self.globals.update(node.names)
@@ -259,12 +322,16 @@ class CFGBuilder(ast.NodeVisitor):
         if isinstance(node.value, ast.Name) and node.value.id in self.tracked:
             self.emit(Escape(node.value.id, "return", node.lineno))
         elif isinstance(node.value, ast.Call):
-            resource = self.catalog.match_acquire(node.value)
+            resource = self._match_acquire(node.value)
             if resource:
+                self.visit_expression(node.value)
+                if self.cur is None:
+                    return
                 temp = f"<return@{node.lineno}>"
                 self.emit(Acquire(temp, resource, node.lineno, node.col_offset, self._snippet(node.value)))
                 self.emit(Escape(temp, "return", node.lineno))
-            self.visit_expression(node.value)
+            else:
+                self.visit_expression(node.value)
         if self.cur is not None and self.finally_stack:
             self.edge(self.cur, self.finally_stack[-1], "return")
             self.cur = None
@@ -351,11 +418,19 @@ class CFGBuilder(ast.NodeVisitor):
         end_line = max((getattr(stmt, "end_lineno", stmt.lineno) for stmt in node.body), default=node.lineno)
         for item in node.items:
             expr = self._unwrap_context(item.context_expr)
-            resource = self.catalog.match_acquire(expr)
+            resource = self._match_acquire(expr)
+            if resource and isinstance(item.context_expr, ast.Call):
+                self.visit_expression(item.context_expr)
+                if self.cur is None:
+                    return
             if resource and isinstance(item.optional_vars, ast.Name):
                 self.tracked[item.optional_vars.id] = resource
+                self.scoped.add(item.optional_vars.id)
                 self.emit(Scoped(item.optional_vars.id, resource, node.lineno, end_line))
-            if isinstance(item.context_expr, ast.Call): self.visit_expression(item.context_expr)
+            # Entering a context evaluates the acquisition first. If it raises,
+            # there is no owned resource yet, so do not add a post-acquire edge.
+            if isinstance(item.context_expr, ast.Call) and resource is None:
+                self.visit_expression(item.context_expr)
         self.visit_body(node.body)
 
     visit_With = _visit_with
