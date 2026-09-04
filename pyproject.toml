@@ -7,6 +7,7 @@ name = "leakguard"
 version = "0.1.0"
 description = "Static resource-leak detection for Python, enforced in CI"
 readme = "README.md"
+# 3.11+ because config.py uses the stdlib `tomllib`, added in 3.11.
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
@@ -31,3 +32,4 @@ leakguard = ["catalog/*.yaml"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-q"

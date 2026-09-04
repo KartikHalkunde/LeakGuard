@@ -1,23 +1,27 @@
 """The canonical machine format.
 
-OWNERSHIP: P2 owns this file. P3 wrote a working version at hour 3.
-
 Every non-terminal surface consumes this: SARIF conversion, the VS Code
-extension, the n8n control plane, and the dashboard. KEEP THE SHAPE STABLE
-after hour 8 - four other things parse it.
+extension, the n8n control plane, and the dashboard. KEEP THE SHAPE STABLE —
+four other things parse it.
+
+Merged from the P2 and P3 branches. P3's version is kept because it carries
+the `context` block (repo, commit, branch, pr_number) that the control-plane
+ingest workflow needs in order to attribute a finding to a repo and a PR;
+`build_report` remains as an alias so P2's call sites keep working.
 """
 
 from __future__ import annotations
 
 import json as _json
+from collections.abc import Iterable
 
-from leakguard.core.finding import Finding
+from leakguard.core.finding import Confidence, Finding
 
 SCHEMA_VERSION = "1.0"
 
 
 def build(
-    findings: list[Finding],
+    findings: Iterable[Finding],
     *,
     files_scanned: int = 0,
     duration_ms: int = 0,
@@ -26,7 +30,9 @@ def build(
     branch: str | None = None,
     pr_number: int | None = None,
 ) -> dict:
-    counts = {"definite": 0, "likely": 0, "possible": 0, "safe": 0}
+    findings = list(findings)
+
+    counts = {c.value: 0 for c in Confidence}
     for f in findings:
         counts[f.confidence.value] += 1
 
@@ -58,5 +64,9 @@ def build(
     return payload
 
 
-def render(findings: list[Finding], **kwargs) -> str:
-    return _json.dumps(build(findings, **kwargs), indent=2)
+#: Alias for the P2 branch's call sites.
+build_report = build
+
+
+def render(findings: Iterable[Finding], *, indent: int | None = 2, **kwargs) -> str:
+    return _json.dumps(build(findings, **kwargs), indent=indent)

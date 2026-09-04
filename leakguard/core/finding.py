@@ -1,19 +1,21 @@
 """Findings — the contract between the engine and every output surface.
 
-TEAM CONTRACT: agreed in hours 0-2. P2 owns further changes to this file.
-P3 wrote the initial version so the CLI could ship at hour 4.
+TEAM CONTRACT. Everything downstream of `Finding` (reporters, SARIF, VS Code,
+the n8n control plane, the dashboard) depends only on this class. Nothing
+downstream needs to know a control-flow graph ever existed. Keep it stable.
 
-Everything downstream of `Finding` (reporters, SARIF, VS Code, n8n, the
-dashboard) depends only on this class. Nothing downstream needs to know a
-control-flow graph ever existed. Keep it stable after hour 8.
+Merged from the P2 and P3 branches: P2's explicit `to_dict` and frozen
+`PathStep`, P3's `rank`/`sort_findings` (the CLI's --fail-on threshold and
+stable output ordering) and defaults on `acquired_col`/`snippet`.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 
 class Confidence(str, Enum):
@@ -24,20 +26,27 @@ class Confidence(str, Enum):
 
 
 #: Severity ordering, used for --fail-on thresholds.
-ORDER: dict[str, int] = {
-    Confidence.SAFE.value: 0,
-    Confidence.POSSIBLE.value: 1,
-    Confidence.LIKELY.value: 2,
-    Confidence.DEFINITE.value: 3,
+#:
+#: Keyed by enum member. Because Confidence mixes in `str`, a plain-string
+#: lookup such as ORDER["definite"] resolves to the same entry, which is what
+#: cli.py relies on when it maps the --fail-on flag.
+ORDER: dict[Confidence, int] = {
+    Confidence.DEFINITE: 3,
+    Confidence.LIKELY: 2,
+    Confidence.POSSIBLE: 1,
+    Confidence.SAFE: 0,
 }
 
 
-@dataclass
+@dataclass(frozen=True)
 class PathStep:
     """One step of the witness path from acquisition to a leaking exit."""
 
     line: int
     note: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"line": self.line, "note": self.note}
 
 
 @dataclass
@@ -59,16 +68,16 @@ class Finding:
     severity: str = "medium"
     ordinal: int = 0
     escape_kind: str | None = None
-    block_path: list[int] = field(default_factory=list)  # for P1's Mermaid
+    block_path: list[int] = field(default_factory=list)  # for the Mermaid CFG
 
     @property
     def fingerprint(self) -> str:
         """Content-based identity, stable across reformatting.
 
         Deliberately excludes line numbers: a line-based fingerprint breaks
-        the moment someone runs `black`, and the baseline ratchet dies with
-        it. `ordinal` disambiguates two identical acquisitions in one
-        function.
+        the moment someone runs a formatter, and the baseline ratchet would
+        die with it. `ordinal` disambiguates two identical acquisitions in
+        one function.
         """
         norm = re.sub(r"\s+", " ", self.snippet).strip()
         norm = re.sub(r"'[^']*'|\"[^\"]*\"", "STR", norm)
@@ -77,20 +86,34 @@ class Finding:
 
     @property
     def rank(self) -> int:
-        return ORDER[self.confidence.value]
+        """Numeric severity, for --fail-on comparisons and sorting."""
+        return ORDER[self.confidence]
 
-    def to_dict(self) -> dict:
-        d = asdict(self)
-        d["confidence"] = self.confidence.value
-        d["fingerprint"] = self.fingerprint
-        d["acquired_at"] = {
-            "line": self.acquired_line,
-            "col": self.acquired_col,
-            "snippet": self.snippet,
+    def to_dict(self) -> dict[str, Any]:
+        """The canonical, JSON-serialisable finding shape."""
+        return {
+            "fingerprint": self.fingerprint,
+            "confidence": self.confidence.value,
+            "resource": self.resource,
+            "file": self.file,
+            "function": self.function,
+            "variable": self.variable,
+            "acquired_at": {
+                "line": self.acquired_line,
+                "col": self.acquired_col,
+                "snippet": self.snippet,
+            },
+            "leak_path": [step.to_dict() for step in self.leak_path],
+            "close_found_at": self.close_found_at,
+            "close_unreachable_from": self.close_unreachable_from,
+            "exit_kind": self.exit_kind,
+            "reason": self.reason,
+            "fix_available": self.fix_available,
+            "severity": self.severity,
+            "ordinal": self.ordinal,
+            "escape_kind": self.escape_kind,
+            "block_path": self.block_path,
         }
-        for k in ("acquired_line", "acquired_col", "snippet"):
-            d.pop(k, None)
-        return d
 
 
 def sort_findings(findings: list[Finding]) -> list[Finding]:

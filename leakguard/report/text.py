@@ -1,14 +1,17 @@
 """Human-readable terminal output.
 
-OWNERSHIP: P2 owns this file. P3 wrote a working version at hour 3 so the CLI
-could ship end-to-end. Replace or refine freely - just keep `render()`'s
-signature, since cli.py, the pre-commit hook and the Action all call it.
+Merged from the P2 and P3 branches. P3's version is kept for one concrete
+reason: the P2 version used the U+00B7 and U+2192 separators, which raise
+UnicodeEncodeError on a Windows cp1252 console. Demo machines are Windows,
+so the renderer stays ASCII-only. P2's `colour` keyword is accepted so their
+call sites keep working.
 """
 
 from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Iterable
 
 from leakguard.core.finding import Confidence, Finding
 
@@ -32,14 +35,16 @@ def _use_color(stream) -> bool:
 
 
 def render(
-    findings: list[Finding],
+    findings: Iterable[Finding],
     *,
     files_scanned: int = 0,
     duration_ms: int = 0,
     stream=None,
+    colour: bool | None = None,
 ) -> str:
+    findings = list(findings)
     stream = stream or sys.stdout
-    color = _use_color(stream)
+    color = _use_color(stream) if colour is None else colour
 
     def c(text: str, code: str) -> str:
         return f"{code}{text}{RESET}" if color else text
@@ -47,12 +52,11 @@ def render(
     out: list[str] = []
 
     for f in findings:
-        head = (
+        out.append(
             f"{c('LEAK', COLORS[f.confidence])} "
             f"({f.confidence.value}) - {f.resource} - "
             f"{c(f.file, BOLD)}:{f.function}"
         )
-        out.append(head)
         out.append("")
         out.append(f"  opened   line {f.acquired_line:<5} {f.snippet}")
 
