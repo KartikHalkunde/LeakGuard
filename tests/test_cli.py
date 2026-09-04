@@ -13,8 +13,7 @@ import pytest
 
 from leakguard.cli import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, main
 from leakguard.core.finding import Confidence, Finding
-
-STUB = "# LEAKGUARD_STUB_LEAK"
+from leakguard.engine import STUB_MARKER as STUB  # imported, never hardcoded
 
 
 @pytest.fixture

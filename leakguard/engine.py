@@ -18,7 +18,10 @@ from leakguard.core.finding import Confidence, Finding, PathStep, sort_findings
 #: Files containing this marker produce a stub finding, so P3 can exercise the
 #: hook and the Action against deliberate, controllable input before the real
 #: engine exists. Remove the marker files once the engine lands.
-STUB_MARKER = "# LEAKGUARD_STUB_LEAK"
+#:
+#: Assembled from two halves on purpose: written as one literal, this line
+#: would itself contain the marker and the stub would flag its own source.
+STUB_MARKER = "# LEAKGUARD_" + "STUB_LEAK"
 
 
 def engine_available() -> bool:
