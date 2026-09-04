@@ -18,7 +18,7 @@ def score(
         return Confidence.POSSIBLE
     if not candidates:
         return Confidence.SAFE
-    if any(candidate["exit_kind"] == "exception" for candidate in candidates):
+    if all(candidate["exit_kind"] == "exception" for candidate in candidates):
         return Confidence.LIKELY
     if len({candidate["exit"] for candidate in candidates}) == len(set(all_exits)):
         return Confidence.DEFINITE

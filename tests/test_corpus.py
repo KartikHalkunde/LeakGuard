@@ -63,7 +63,7 @@ def test_corpus_has_expected_shape():
     safe = list((CORPUS_ROOT / "safe").glob("*.py"))
     leaky = list((CORPUS_ROOT / "leaky").glob("*.py"))
     assert len(safe) == 15, f"expected 15 safe/ files, found {len(safe)}"
-    assert len(leaky) == 10, f"expected 10 leaky/ files, found {len(leaky)}"
+    assert len(leaky) == 11, f"expected 11 leaky/ files, found {len(leaky)}"
 
     for path in safe:
         assert expectations(path) == [], f"{path.name} is in safe/ but has a LEAK directive"

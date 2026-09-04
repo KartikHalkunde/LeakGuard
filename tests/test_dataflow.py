@@ -70,6 +70,20 @@ def test_exception_only_candidate_never_becomes_definite() -> None:
     assert score([{"exit": 1, "exit_kind": "exception"}], [1]) is Confidence.LIKELY
 
 
+def test_unconditional_leak_is_definite_even_alongside_an_exception_candidate() -> None:
+    """A resource that leaks on every exit is DEFINITE even when one of those
+    exits happens to be reached via an exception edge too - the exception-only
+    cap (previous test) applies when EVERY candidate is exception-kind, not
+    when ANY candidate is. Regression test for a bug where `any()` was used
+    instead of `all()`, which silently downgraded genuinely unconditional
+    leaks (e.g. two risky calls before a non-closing return) to LIKELY."""
+    candidates = [
+        {"exit": 1, "exit_kind": "return"},
+        {"exit": 2, "exit_kind": "exception"},
+    ]
+    assert score(candidates, [1, 2]) is Confidence.DEFINITE
+
+
 def test_early_return_report_prefers_return_and_uses_source_line() -> None:
     finding = analyze_file(Path("tests/corpus/leaky/01_early_return.py"))[0]
     assert finding.exit_kind == "return"
