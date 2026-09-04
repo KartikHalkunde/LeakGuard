@@ -39,7 +39,12 @@ def make_patch(finding: Finding, source: str) -> str | None:
         close = re.compile(rf"^[ \t]*{re.escape(finding.variable)}\.(close|shutdown)\(\)\s*(?:#.*)?$")
         if close.match(lines[end].rstrip("\r\n")):
             body = [inner_indent + line[len(indent):] if line.strip() else line for line in lines[start + 1:end]]
-            replacement = [f"{indent}with {match.group('call')} as {finding.variable}:\n", *body]
+            if finding.resource == "builtins.file":
+                replacement = [f"{indent}with {match.group('call')} as {finding.variable}:\n", *body]
+            else:
+                close_text = lines[end][len(indent):] if lines[end].startswith(indent) else lines[end].lstrip()
+                replacement = [lines[start], f"{indent}try:\n", *body,
+                               f"{indent}finally:\n", f"{inner_indent}{close_text}"]
             return "".join(lines[:start] + replacement + lines[end + 1:])
 
     # Conservative fallback: protect the remaining statements in the same

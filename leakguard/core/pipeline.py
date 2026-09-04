@@ -51,7 +51,19 @@ class _CatalogAdapter:
 
 def _params(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
     args = function.args
-    return [a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+    names = [a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+    if args.vararg:
+        names.append(args.vararg.arg)
+    if args.kwarg:
+        names.append(args.kwarg.arg)
+    return names
+
+
+def _qualname(function: ast.FunctionDef | ast.AsyncFunctionDef, tree: ast.Module) -> str:
+    for parent in ast.walk(tree):
+        if isinstance(parent, ast.ClassDef) and function in parent.body:
+            return f"{parent.name}.{function.name}"
+    return function.name
 
 
 def _read_module(path: Path) -> _Module:
@@ -66,8 +78,11 @@ def build_module_cfgs(module: _Module, catalog: Catalog, helpers: dict[str, str]
     cfgs: dict[str, CFG] = {}
     params: dict[str, list[str]] = {}
     for function in iter_functions(module.tree):
-        cfgs[function.name] = build_cfg(function, str(module.path).replace("\\", "/"), adapter, module.source)
-        params[function.name] = _params(function)
+        name = _qualname(function, module.tree)
+        cfg = build_cfg(function, str(module.path).replace("\\", "/"), adapter, module.source)
+        cfg.func_name = name
+        cfgs[name] = cfg
+        params[name] = _params(function)
     return cfgs, params
 
 
@@ -91,6 +106,12 @@ def run_pipeline(paths: list[Path], config) -> list[Finding]:
         source = path.read_text(encoding="utf-8")
         findings.extend(analyze_source(source, str(path).replace("\\", "/"), config))
     return findings
+
+
+def analyze_file(path: Path, config=None) -> list[Finding]:
+    """Analyze one file while preserving SyntaxError as the CLI tool-error contract."""
+    source = path.read_text(encoding="utf-8")
+    return analyze_source(source, str(path).replace("\\", "/"), config)
 
 
 def cfg_for_function(path: Path, function_name: str, config=None) -> tuple[CFG, list[Finding]]:

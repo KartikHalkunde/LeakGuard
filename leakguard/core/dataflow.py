@@ -97,9 +97,11 @@ def transfer(
     out = dict(state)
     match event:
         case Acquire(var=var):
-            _set_family(out, var, State.OPEN, aliases)
+            next_state = State.MAYBE_OPEN if out.get(var) in (State.OPEN, State.MAYBE_OPEN) else State.OPEN
+            _set_family(out, var, next_state, aliases)
         case Release(var=var):
-            _set_family(out, var, State.CLOSED, aliases)
+            next_state = State.MAYBE_OPEN if out.get(var) is State.MAYBE_OPEN else State.CLOSED
+            _set_family(out, var, next_state, aliases)
         case Escape(var=var):
             _set_family(out, var, State.ESCAPED, aliases)
         case Scoped(var=var):
@@ -188,23 +190,19 @@ def _exit_kind(cfg: CFG, exit_block: int) -> str:
     return cfg.edge_kind(predecessors[0], exit_block) or "fallthrough"
 
 
+def _acquisition_failure_source(cfg: CFG, source: int) -> bool:
+    normal_successors = [
+        edge.dst for edge in cfg.edges if edge.src == source and edge.kind == "normal"
+    ]
+    return any(
+        any(isinstance(event, Acquire) for event in cfg.blocks[successor].events)
+        for successor in normal_successors
+    )
+
+
 def _acquisition_failure_only(cfg: CFG, exit_block: int) -> bool:
-    if cfg.blocks[exit_block].kind != "exception_exit":
-        return False
     predecessors = cfg.preds(exit_block)
-    if not predecessors:
-        return False
-    for predecessor in predecessors:
-        normal_successors = [
-            edge.dst for edge in cfg.edges
-            if edge.src == predecessor and edge.kind == "normal"
-        ]
-        if not any(
-            any(isinstance(event, Acquire) for event in cfg.blocks[successor].events)
-            for successor in normal_successors
-        ):
-            return False
-    return True
+    return bool(predecessors) and all(_acquisition_failure_source(cfg, source) for source in predecessors)
 
 
 def check_exits(
@@ -213,7 +211,16 @@ def check_exits(
     acquisitions = acquisitions or _acquire_blocks(cfg)
     candidates: list[LeakCandidate] = []
     for exit_block in cfg.exits:
-        if _acquisition_failure_only(cfg, exit_block):
+        if cfg.blocks[exit_block].kind == "exception_exit":
+            for predecessor in cfg.preds(exit_block):
+                if _acquisition_failure_source(cfg, predecessor):
+                    continue
+                for var, state in outbound[predecessor].items():
+                    if state in (State.OPEN, State.MAYBE_OPEN) and var in acquisitions:
+                        path = bfs_path(cfg, acquisitions[var][0], predecessor)
+                        if path:
+                            path.append(exit_block)
+                        candidates.append(LeakCandidate(var, exit_block, state, "exception", path))
             continue
         for var, state in outbound[exit_block].items():
             if state in (State.OPEN, State.MAYBE_OPEN) and var in acquisitions:
@@ -292,7 +299,10 @@ def analyze_cfg(cfg: CFG, summaries: Mapping[str, Summary] | None = None) -> lis
         )
         if confidence is Confidence.SAFE:
             continue
-        primary = var_candidates[0] if var_candidates else None
+        primary = min(
+            var_candidates,
+            key=lambda candidate: {"return": 0, "fallthrough": 1, "exception": 2}.get(candidate.exit_kind, 3),
+        ) if var_candidates else None
         close_lines = [event.line for event in events if isinstance(event, Release) and event.var == var]
         unreachable = None
         if primary and primary.path:
