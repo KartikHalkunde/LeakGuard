@@ -11,6 +11,7 @@ Use Node.js 22 or newer (`node:sqlite` is used). Create `dashboard/.env.local`:
 ```dotenv
 LEAKGUARD_SECRET=replace-with-a-long-random-value
 LEAKGUARD_GITHUB_ORG=your-github-organization
+# Recommended for private repos and higher API limits. Public repos work without it.
 GITHUB_TOKEN=github-token-with-metadata-read-actions-read-members-read
 GITHUB_WEBHOOK_SECRET=another-long-random-value
 LEAKGUARD_ADMIN_TOKEN=token-for-scheduled-sync-calls
@@ -42,12 +43,18 @@ filesystem.
 - `POST /api/control-plane/github/sync`: bearer-authenticated scheduled sync.
 - `GET /api/organization`: paginated, filtered DB snapshot consumed by the UI.
 
-Set repository secret `LEAKGUARD_CONTROL_PLANE_URL` to the public base
-`https://your-dashboard.example/api/control-plane` and set the same
-`LEAKGUARD_SECRET` in GitHub and the dashboard. Configure an organization
+Set the same `LEAKGUARD_SECRET` in GitHub Actions and the dashboard service.
+Configure an organization
 webhook pointing to
 `https://your-dashboard.example/api/control-plane/github/webhook`, select
 workflow-run and repository/member events, and use `GITHUB_WEBHOOK_SECRET`.
+
+This repository's organization workflow already points at
+`https://vh26-codeblooded.onrender.com/api/control-plane`. `render.yaml`
+defines the Node 22 service, health check, persistent SQLite disk and all
+required secret placeholders. Render and GitHub still require the secret
+values to be entered in their authenticated settings; they must never be
+committed.
 
 The technical evidence pages (`/findings`, `/cfg`, `/fp-rate`) remain local
 analyzer demonstrations. Browser requests cannot choose arbitrary commands or

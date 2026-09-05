@@ -25,5 +25,5 @@ jobs:
           paths: "."
           diff-only: "true"
           fail-on: "likely"
-          control-plane: ${{ secrets.LEAKGUARD_CONTROL_PLANE_URL }}
+          control-plane: https://vh26-codeblooded.onrender.com/api/control-plane
           upload-sarif: "true"

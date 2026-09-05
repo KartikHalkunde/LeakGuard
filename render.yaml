@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: vh26-codeblooded
+    runtime: node
+    rootDir: dashboard
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: LEAKGUARD_DB_PATH
+        value: /var/data/control-plane.sqlite
+      - key: LEAKGUARD_GITHUB_ORG
+        value: KartikHalkunde
+      - key: LEAKGUARD_GITHUB_SYNC_SECONDS
+        value: "60"
+      - key: LEAKGUARD_GITHUB_REPO_LIMIT
+        value: "1000"
+      - key: LEAKGUARD_SECRET
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      - key: LEAKGUARD_ADMIN_TOKEN
+        sync: false
+      - key: LEAKGUARD_DASHBOARD_USER
+        sync: false
+      - key: LEAKGUARD_DASHBOARD_PASSWORD
+        sync: false
+    disk:
+      name: leakguard-data
+      mountPath: /var/data
+      sizeGB: 1

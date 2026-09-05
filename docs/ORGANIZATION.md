@@ -19,11 +19,9 @@ and an admin dashboard/control-plane service. Employees install nothing.
 
 ## GitHub configuration
 
-Set repository or organization Actions secrets:
-
-- `LEAKGUARD_CONTROL_PLANE_URL` =
-  `https://your-dashboard.example/api/control-plane`
-- `LEAKGUARD_SECRET` = the same signing secret used by the dashboard
+Set repository or organization Actions secret `LEAKGUARD_SECRET` to the same
+signing secret used by the dashboard. The checked-in workflow already targets
+`https://vh26-codeblooded.onrender.com/api/control-plane`.
 
 In **Settings → Rules → Rulesets**, target the default branch and require:
 

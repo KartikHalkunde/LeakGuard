@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (pathname === "/api/control-plane/ingest" || pathname === "/api/control-plane/github/webhook") {
+  if (pathname === "/api/health" || pathname === "/api/control-plane/ingest" || pathname === "/api/control-plane/github/webhook") {
     return NextResponse.next();
   }
   const user = process.env.LEAKGUARD_DASHBOARD_USER;
