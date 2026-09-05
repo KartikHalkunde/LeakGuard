@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -6,10 +7,21 @@ let database: DatabaseSync | undefined;
 
 export function db(): DatabaseSync {
   if (database) return database;
-  const path = process.env.LEAKGUARD_DB_PATH
+  const configuredPath = process.env.LEAKGUARD_DB_PATH
     ? resolve(process.env.LEAKGUARD_DB_PATH)
     : resolve(process.cwd(), ".leakguard-data", "control-plane.sqlite");
-  mkdirSync(dirname(path), { recursive: true });
+  let path = configuredPath;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+  } catch (error) {
+    if (!process.env.RENDER || !(error instanceof Error) || !("code" in error) || error.code !== "EACCES") throw error;
+    // Render Free has no persistent disk. Keep the demo functional on its
+    // ephemeral filesystem; /var/data is used automatically once a paid disk
+    // is attached. Health/API responses expose persistence mode clearly.
+    path = resolve(tmpdir(), "leakguard", "control-plane.sqlite");
+    mkdirSync(dirname(path), { recursive: true });
+    process.env.LEAKGUARD_DB_EPHEMERAL = "true";
+  }
   database = new DatabaseSync(path);
   database.exec(`
     PRAGMA journal_mode = WAL;

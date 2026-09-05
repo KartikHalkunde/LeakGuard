@@ -10,6 +10,7 @@ export function GET() {
     return NextResponse.json({
       status: "ok",
       database: "ready",
+      persistence: process.env.LEAKGUARD_DB_EPHEMERAL === "true" ? "ephemeral" : "persistent",
       githubSyncConfigured: Boolean(process.env.LEAKGUARD_GITHUB_ORG),
       githubAuthenticated: Boolean(process.env.GITHUB_TOKEN),
       signedIngestConfigured: Boolean(process.env.LEAKGUARD_SECRET),
