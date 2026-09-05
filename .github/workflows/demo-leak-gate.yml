@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      LEAKGUARD_SECRET: ${{ secrets.LEAKGUARD_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - name: Run LeakGuard gate against demo application
@@ -27,4 +29,5 @@ jobs:
           paths: demo-repo/app
           fail-on: likely
           diff-only: "false"
+          control-plane: https://vh26-codeblooded.onrender.com/api/control-plane
           upload-sarif: "false"
