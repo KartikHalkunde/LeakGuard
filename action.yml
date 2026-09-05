@@ -109,6 +109,11 @@ runs:
         import json, os, pathlib
         path = pathlib.Path("leakguard.json")
         payload = json.loads(path.read_text(encoding="utf-8"))
+        # Organization telemetry contains evidence metadata, never source text.
+        for finding in payload.get("findings", []):
+            acquired = finding.get("acquired_at")
+            if isinstance(acquired, dict):
+                acquired.pop("snippet", None)
         context = payload.setdefault("context", {})
         context["gate_status"] = (
             "passed" if os.environ["SCAN_CODE"] == "0"
