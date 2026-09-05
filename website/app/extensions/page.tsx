@@ -1,11 +1,12 @@
+import { CodeBlock } from "@/components/CodeBlock";
+
 const REPO_URL = "https://github.com/KartikHalkunde/VH26-CodeBlooded";
 const VSCODE_DIR = `${REPO_URL}/tree/main/integrations/vscode`;
 
 export default function ExtensionsPage() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-16">
-      <p className="font-mono text-sm text-accent">editor integration</p>
-      <h1 className="mt-2 text-3xl font-bold text-fg">Extensions</h1>
+      <h1 className="text-3xl font-bold text-fg">Extensions</h1>
       <p className="mt-4 text-muted">
         LeakGuard&apos;s editor extension is a thin client - on save, it shells out to the same{" "}
         <code className="text-fg">leakguard check --format json</code> command you&apos;d run
@@ -25,7 +26,7 @@ export default function ExtensionsPage() {
           The extension isn&apos;t published to the VS Code Marketplace yet - install it locally
           from source:
         </p>
-        <div className="code-block mt-4">
+        <CodeBlock className="mt-4">
 {`git clone ${REPO_URL}
 cd VH26-CodeBlooded/integrations/vscode
 npm install
@@ -36,7 +37,7 @@ code . # then press F5 inside VS Code
 # Option B - package it and install the .vsix yourself
 npx vsce package
 code --install-extension leakguard-*.vsix`}
-        </div>
+        </CodeBlock>
         <a
           href={VSCODE_DIR}
           target="_blank"
@@ -60,9 +61,9 @@ code --install-extension leakguard-*.vsix`}
           packages, so there&apos;s no separate Cursor build to maintain. Package the extension as
           above, then install the same file:
         </p>
-        <div className="code-block mt-4">
+        <CodeBlock className="mt-4">
 {`cursor --install-extension leakguard-*.vsix`}
-        </div>
+        </CodeBlock>
       </section>
 
       {/* Other editors */}
@@ -73,9 +74,9 @@ code --install-extension leakguard-*.vsix`}
           shell command on save and read JSON can build an equivalent integration in a similar
           amount of code. The contract is one command:
         </p>
-        <div className="code-block mt-4">
+        <CodeBlock className="mt-4">
 {`leakguard check <file> --format json`}
-        </div>
+        </CodeBlock>
       </section>
     </div>
   );

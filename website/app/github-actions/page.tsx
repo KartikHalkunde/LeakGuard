@@ -1,12 +1,14 @@
+import { CodeBlock } from "@/components/CodeBlock";
+import { DownloadBlock } from "@/components/DownloadBlock";
+
 const REPO_URL = "https://github.com/KartikHalkunde/VH26-CodeBlooded";
-const ACTION_FILE = `${REPO_URL}/blob/main/action.yml`;
+const DEMO_WORKFLOW_FILE = "https://github.com/KartikHalkunde/demo-repo/blob/main/.github/workflows/leakguard.yml";
 const HOOK_FILE = `${REPO_URL}/blob/main/.pre-commit-hooks.yaml`;
 
 export default function GithubActionsPage() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-16">
-      <p className="font-mono text-sm text-accent">continuous integration</p>
-      <h1 className="mt-2 text-3xl font-bold text-fg">GitHub Actions</h1>
+      <h1 className="text-3xl font-bold text-fg">GitHub Actions</h1>
       <p className="mt-4 text-muted">
         LeakGuard ships as a reusable GitHub Action, so any repository can run it on every push
         and pull request without vendoring any of its code. The Action installs the package from
@@ -19,35 +21,36 @@ export default function GithubActionsPage() {
         <p className="mt-2 text-sm text-muted">
           Create <code className="text-fg">.github/workflows/leakguard.yml</code> in your repo:
         </p>
-        <div className="code-block mt-4">
+        <DownloadBlock className="mt-4" filename="leakguard.yml">
 {`name: LeakGuard
 
 on:
-  push:
   pull_request:
+  push:
     branches: [main]
 
-permissions:
-  contents: read
-  security-events: write   # required to upload SARIF results
-
 jobs:
-  leakguard:
+  scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
-
-      - uses: KartikHalkunde/VH26-CodeBlooded@main
+      - uses: KartikHalkunde/VH26-CodeBlooded@nikita
         with:
-          fail-on: definite`}
-        </div>
+          paths: app
+          fail-on: likely
+          diff-only: false
+          upload-sarif: true`}
+        </DownloadBlock>
         <a
-          href={ACTION_FILE}
+          href={DEMO_WORKFLOW_FILE}
           target="_blank"
           rel="noopener noreferrer"
           className="mt-4 inline-block text-sm text-fg underline underline-offset-4 hover:text-accent"
         >
-          Read the full action.yml ↗
+          See it running in demo-repo ↗
         </a>
       </section>
 
@@ -80,14 +83,14 @@ jobs:
           Pair the Action with the pre-commit hook so the same check runs fully offline, before a
           commit is even created:
         </p>
-        <div className="code-block mt-4">
+        <CodeBlock className="mt-4">
 {`# .pre-commit-config.yaml
 repos:
   - repo: ${REPO_URL}
     rev: main
     hooks:
       - id: leakguard`}
-        </div>
+        </CodeBlock>
         <a
           href={HOOK_FILE}
           target="_blank"
