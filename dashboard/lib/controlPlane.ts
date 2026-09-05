@@ -8,7 +8,7 @@ type ScanRow = { id: number; repository: string; actor: string; branch: string; 
 type RepoRow = { full_name: string; name: string; language: string };
 type PersonRow = { login: string; name: string };
 type MemberRow = { repository: string; login: string };
-type WorkflowRow = { repository: string; actor: string; branch: string; conclusion: string | null; created_at: string };
+type WorkflowRow = { run_id: number; repository: string; actor: string; branch: string; workflow: string; status: string; conclusion: string | null; run_url: string | null; created_at: string };
 
 function string(value: unknown, fallback = ""): string { return typeof value === "string" && value ? value : fallback; }
 function number(value: unknown): number { return typeof value === "number" && Number.isFinite(value) ? value : 0; }
@@ -95,7 +95,7 @@ export function buildOrganizationSnapshot(filters: { range: string; search: stri
   const repoRows = connection.prepare("SELECT full_name,name,language FROM repositories ORDER BY name").all() as unknown as RepoRow[];
   const people = connection.prepare("SELECT login,name FROM people ORDER BY login").all() as unknown as PersonRow[];
   const memberships = connection.prepare("SELECT repository,login FROM repository_members").all() as unknown as MemberRow[];
-  const workflows = connection.prepare("SELECT repository,actor,branch,conclusion,created_at FROM workflow_runs WHERE created_at >= ?").all(since) as unknown as WorkflowRow[];
+  const workflows = connection.prepare("SELECT run_id,repository,actor,branch,workflow,status,conclusion,run_url,created_at FROM workflow_runs WHERE created_at >= ? ORDER BY created_at DESC").all(since) as unknown as WorkflowRow[];
   const names = new Map(people.map((person) => [person.login, person.name]));
   const latestScopeScan = new Map<string, number>();
   for (const scan of scans) {
@@ -137,11 +137,12 @@ export function buildOrganizationSnapshot(filters: { range: string; search: stri
     const cleanRate = mine.length ? Math.round(clean / mine.length * 100) : 100;
     return { login, name: names.get(login) ?? login, avatar: login[0]?.toUpperCase() ?? "?", scans: mine.length, blocked: mine.filter((scan) => scan.gate_status === "blocked").length, open: mineOpen.length, fixed: mineFixed, fixRate: mineIncidents.length ? Math.round(mineFixed / mineIncidents.length * 100) : 100, cleanRate, avgFixHours: 0, score: Math.max(0, cleanRate - mineOpen.length * 2), scoreDelta: 0, cleanRateDelta: 0, definite: mineOpen.filter((i) => i.confidence === "definite").length, likely: mineOpen.filter((i) => i.confidence === "likely").length, possible: mineOpen.filter((i) => i.confidence === "possible").length, repeats: Math.max(0, mineIncidents.length - new Set(mineIncidents.map((i) => i.resource)).size), topResource: mineOpen[0]?.resource ?? "None", repositories };
   });
+  const activity = workflows.map((run) => ({ repository: run.repository, id: run.run_id, employee: run.actor, branch: run.branch, workflow: run.workflow, status: run.status, conclusion: run.conclusion ?? "pending", createdAt: run.created_at, runUrl: run.run_url ?? undefined }));
   const repositoryRows: RepositoryRisk[] = [...repoNames].map((fullName) => {
     const row = repoRows.find((repo) => repo.full_name === fullName); const repoScans = scans.filter((scan) => scan.repository === fullName); const repoIncidents = incidents.filter((incident) => incident.repository === fullName);
     const memberLogins = [...new Set([...memberships.filter((member) => member.repository === fullName).map((member) => member.login), ...repoScans.map((scan) => scan.actor)])];
     const members = memberLogins.map((login) => { const checks = repoScans.filter((scan) => scan.actor === login); const errors = repoIncidents.filter((incident) => incident.employee === login).length; const clean = checks.filter((scan) => scan.gate_status === "passed").length; return { login, checks: checks.length, cleanRate: checks.length ? Math.round(clean / checks.length * 100) : 100, errors, blocked: checks.filter((scan) => scan.gate_status === "blocked").length }; });
-    const open = repoIncidents.filter((incident) => incident.status === "open").length; return { name: fullName, language: row?.language ?? "Unknown", open, blockedPrs: repoScans.filter((scan) => scan.gate_status === "blocked").length, scans: repoScans.length, risk: open > 10 ? "critical" : open ? "high" : "low", members, teams: members.length ? [{ name: "Repository contributors", lead: members[0].login, members: members.map((m) => m.login), cleanRate: Math.round(members.reduce((s,m) => s + m.cleanRate, 0) / members.length), open, blocked: repoScans.filter((scan) => scan.gate_status === "blocked").length }] : [] };
+    const open = repoIncidents.filter((incident) => incident.status === "open").length; return { name: fullName, language: row?.language ?? "Unknown", open, blockedPrs: repoScans.filter((scan) => scan.gate_status === "blocked").length, scans: repoScans.length, risk: open > 10 ? "critical" : open ? "high" : "low", members, teams: members.length ? [{ name: "Repository contributors", lead: members[0].login, members: members.map((m) => m.login), cleanRate: Math.round(members.reduce((s,m) => s + m.cleanRate, 0) / members.length), open, blocked: repoScans.filter((scan) => scan.gate_status === "blocked").length }] : [], activity: activity.filter((entry) => entry.repository === fullName) };
   });
   const tokens = filters.search.toLowerCase().split(/\s+/).filter(Boolean);
   const match = (...values: string[]) => !tokens.length || tokens.every((token) => values.join(" ").toLowerCase().includes(token));

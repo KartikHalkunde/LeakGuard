@@ -59,6 +59,16 @@ main { padding:44px 48px; max-width:1500px; width:100%; }.eyebrow { text-transfo
 .team-card>div { padding-top:9px;border-top:1px solid #243044;color:var(--muted);font-size:10px }
 .team-card>div b { color:var(--text);margin-right:3px }
 @media(max-width:600px){.personal-bars{gap:4px}.personal-bars span{width:18px}.team-strip{grid-template-columns:1fr}}
+.activity-heading { margin-top:22px }
+.activity-log-list { display:grid;gap:7px;max-height:360px;overflow-y:auto;padding-right:3px;scrollbar-width:thin;scrollbar-color:#405574 #101827 }
+.activity-log { display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:10px;border:1px solid #263247;border-radius:9px;background:#080f18;font-size:10px }
+.activity-log strong { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
+.activity-log small { display:block;margin-top:3px;color:var(--muted);overflow:hidden;text-overflow:ellipsis }
+.activity-log time { color:var(--muted);white-space:nowrap;font-size:9px }
+.activity-log a { color:#8fc2ff;text-decoration:none;white-space:nowrap }
+.activity-status { padding:3px 6px;border-radius:8px;background:#243044;color:#bac8da;font-size:8px;text-transform:uppercase }
+.activity-status.success { background:#153326;color:#9ee1bc }.activity-status.failure { background:#3a1c24;color:#ffadb7 }.activity-status.pending { background:#2e2b17;color:#ffd878 }
+@media(max-width:700px){.activity-log{grid-template-columns:auto 1fr}.activity-log time,.activity-log a{grid-column:2}.activity-log time{white-space:normal}}
 
 /* Backward-compatible guard for browser tabs holding the pre-fix component.
    Tailwind's `.fixed` utility must never position an analytics bar globally. */

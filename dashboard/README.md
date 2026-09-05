@@ -21,6 +21,11 @@ LEAKGUARD_DASHBOARD_PASSWORD=replace-with-a-strong-password
 LEAKGUARD_DB_PATH=C:/persistent/leakguard/control-plane.sqlite
 LEAKGUARD_GITHUB_SYNC_SECONDS=60
 LEAKGUARD_GITHUB_REPO_LIMIT=1000
+# Optional safety caps; each defaults to 1000 so paginated syncs do not stop
+# after GitHub's first 100 members or first 20 workflow runs.
+LEAKGUARD_GITHUB_MEMBER_LIMIT=1000
+LEAKGUARD_GITHUB_BRANCH_LIMIT=1000
+LEAKGUARD_GITHUB_WORKFLOW_LIMIT=1000
 ```
 
 Run it:
@@ -35,6 +40,11 @@ Open `http://localhost:3000`. The UI polls its DB every 15 seconds. **Refresh
 GitHub** forces a GitHub API refresh. For production, deploy on a Node host with
 a persistent volume; do not put the SQLite file on an ephemeral serverless
 filesystem.
+
+Member sync merges collaborators, contributors, and the heads of every visible
+branch. This includes people working only on unmerged feature branches. The
+repository detail view also lists every stored GitHub Actions run in the chosen
+date range, with a link back to the original run.
 
 ## Live inputs
 

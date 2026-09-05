@@ -7,7 +7,8 @@ export interface EmployeeRisk {
 }
 export interface RepositoryMember { login: string; checks: number; cleanRate: number; errors: number; blocked: number }
 export interface RepositoryTeam { name: string; lead: string; members: string[]; cleanRate: number; open: number; blocked: number }
-export interface RepositoryRisk { name: string; language: string; open: number; blockedPrs: number; scans: number; risk: "critical" | "high" | "low"; members: RepositoryMember[]; teams: RepositoryTeam[] }
+export interface ActivityLog { id: number; employee: string; branch: string; workflow: string; status: string; conclusion: string; createdAt: string; runUrl?: string }
+export interface RepositoryRisk { name: string; language: string; open: number; blockedPrs: number; scans: number; risk: "critical" | "high" | "low"; members: RepositoryMember[]; teams: RepositoryTeam[]; activity?: ActivityLog[] }
 export interface Incident {
   id: string; employee: string; repository: string; branch: string; pr: number; file: string; resource: string;
   confidence: "definite" | "likely" | "possible"; status: "open" | "fixed"; gate: GateStatus; detectedAt: string;
