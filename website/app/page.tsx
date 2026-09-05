@@ -13,10 +13,7 @@ export default function HomePage() {
     <div className="mx-auto max-w-5xl px-6">
       {/* Hero */}
       <section className="pb-16 pt-20 text-center">
-        <span className="badge border border-border bg-panel text-muted">
-          static analysis for Python
-        </span>
-        <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-bold leading-tight tracking-tight text-fg sm:text-5xl">
+        <h1 className="mx-auto max-w-3xl text-4xl font-bold leading-tight tracking-tight text-fg sm:text-5xl">
           Find the resource leak a text search{" "}
           <span className="text-accent">can&apos;t</span>.
         </h1>
