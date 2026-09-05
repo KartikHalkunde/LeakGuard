@@ -15,7 +15,8 @@ and an admin dashboard/control-plane service. Employees install nothing.
 5. The control plane attributes findings to GitHub actor, repository, branch,
    commit, PR and run URL, and persists them in SQLite.
 6. A later clean scan on the same employee/repository/branch marks the previous
-   finding fixed. The dashboard polls every 15 seconds.
+   finding fixed. The dashboard refreshes every two seconds; the signed report
+   is normally visible immediately after the GitHub Action completes.
 
 ## GitHub configuration
 
@@ -38,7 +39,10 @@ The workflow creates the failing check. The ruleset is what prevents merge.
 The dashboard owns its backend and DB. `GITHUB_TOKEN` plus
 `LEAKGUARD_GITHUB_ORG` allow it to discover repositories, collaborators and
 recent workflow runs. A GitHub organization webhook provides immediate
-workflow updates; the API sync is the reconciliation/fallback path.
+workflow updates; the API sync is the reconciliation/fallback path. Accuracy
+uses signed LeakGuard reports when present and completed GitHub workflow
+outcomes while a report is in transit, so an employee with no recorded check
+is shown as unmeasured rather than incorrectly as 100% accurate.
 
 Required server variables and exact endpoints are documented in
 `dashboard/README.md`. A local dashboard cannot receive GitHub cloud callbacks;

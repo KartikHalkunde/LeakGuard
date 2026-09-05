@@ -157,12 +157,19 @@ runs:
           exit 0
         fi
         SIG=$(leakguard sign leakguard.json)
-        curl -sf -X POST "${LEAKGUARD_CONTROL_PLANE%/}/ingest" \
+        RESPONSE=$(mktemp)
+        HTTP_CODE=$(curl -sS -o "$RESPONSE" -w "%{http_code}" -X POST "${LEAKGUARD_CONTROL_PLANE%/}/ingest" \
           -H "Content-Type: application/json" \
           -H "X-LeakGuard-Signature: $SIG" \
           --max-time 10 \
-          -d @leakguard.json \
-          || echo "control plane unreachable - continuing"
+          -d @leakguard.json || true)
+        if [[ "$HTTP_CODE" =~ ^2 ]]; then
+          echo "LeakGuard report delivered to control plane."
+        else
+          echo "::warning::LeakGuard report was not stored by the control plane (HTTP ${HTTP_CODE:-network error}). Dashboard accuracy may be incomplete."
+          tr -cd '\11\12\15\40-\176' < "$RESPONSE" | head -c 500 || true
+          echo
+        fi
 
     - name: Job summary
       if: always()

@@ -50,4 +50,18 @@ describe("organization control plane", () => {
     expect(snapshot.repositories[0].members.map((member) => member.login)).toEqual(["ana", "ben"]);
     expect(snapshot.repositories[0].activity).toEqual([expect.objectContaining({ id: 91, employee: "ben", branch: "feat/logs", conclusion: "success" })]);
   });
+
+  it("uses completed workflow outcomes until the signed LeakGuard report arrives", () => {
+    const repository = "acme/api";
+    upsertRepository({ full_name: repository, name: "api", language: "Python" });
+    const createdAt = new Date().toISOString();
+    upsertWorkflowRun({ id: 101, actor: { login: "leaky-dev", name: "Leaky Dev" }, head_branch: "feat/leak", name: "CI", status: "completed", conclusion: "failure", created_at: createdAt }, repository);
+    upsertWorkflowRun({ id: 102, actor: { login: "clean-dev", name: "Clean Dev" }, head_branch: "feat/clean", name: "CI", status: "completed", conclusion: "success", created_at: createdAt }, repository);
+
+    const snapshot = buildOrganizationSnapshot({ range: "7d", search: "", repository: "all", employee: "all", page: 1, pageSize: 25 });
+    const leaky = snapshot.employees.find((employee) => employee.login === "leaky-dev");
+    const clean = snapshot.employees.find((employee) => employee.login === "clean-dev");
+    expect(leaky).toMatchObject({ scans: 1, cleanRate: 0, blocked: 1 });
+    expect(clean).toMatchObject({ scans: 1, cleanRate: 100, blocked: 0 });
+  });
 });

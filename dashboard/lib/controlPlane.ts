@@ -53,6 +53,9 @@ export function upsertWorkflowRun(run: JsonObject, repository: string): void {
   const actor = (run.actor as JsonObject | undefined) ?? {};
   const login = string(actor.login, "github-actions");
   const now = new Date().toISOString();
+  // Workflow events arrive before the periodic member inventory. Attribute the
+  // run immediately so a new employee's first push is visible straight away.
+  if (login !== "github-actions" && login !== "dependabot") upsertPerson(actor, repository);
   db().prepare(`INSERT INTO workflow_runs(run_id,repository,actor,branch,workflow,status,conclusion,run_url,created_at,updated_at)
     VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET status=excluded.status,conclusion=excluded.conclusion,updated_at=excluded.updated_at`).run(
       number(run.id), repository, login, string(run.head_branch, "unknown"), string(run.name, "GitHub Actions"),
@@ -96,6 +99,17 @@ export function buildOrganizationSnapshot(filters: { range: string; search: stri
   const people = connection.prepare("SELECT login,name FROM people ORDER BY login").all() as unknown as PersonRow[];
   const memberships = connection.prepare("SELECT repository,login FROM repository_members").all() as unknown as MemberRow[];
   const workflows = connection.prepare("SELECT run_id,repository,actor,branch,workflow,status,conclusion,run_url,created_at FROM workflow_runs WHERE created_at >= ? ORDER BY created_at DESC").all(since) as unknown as WorkflowRow[];
+  const scanRunUrls = new Set(scans.map((scan) => scan.run_url).filter((url): url is string => Boolean(url)));
+  // A signed LeakGuard report is the richest source of truth. GitHub workflow
+  // results fill the gap when a report has not reached the control plane yet,
+  // so an employee can never appear 100% accurate with zero recorded checks.
+  const workflowChecks = workflows.filter((run) => (run.conclusion === "success" || run.conclusion === "failure") && (!run.run_url || !scanRunUrls.has(run.run_url)));
+  const checkStats = (actor?: string, repository?: string) => {
+    const reportChecks = scans.filter((scan) => (!actor || scan.actor === actor) && (!repository || scan.repository === repository));
+    const workflowOnly = workflowChecks.filter((run) => (!actor || run.actor === actor) && (!repository || run.repository === repository));
+    const passed = reportChecks.filter((scan) => scan.gate_status === "passed").length + workflowOnly.filter((run) => run.conclusion === "success").length;
+    return { total: reportChecks.length + workflowOnly.length, passed, blocked: reportChecks.filter((scan) => scan.gate_status !== "passed").length + workflowOnly.filter((run) => run.conclusion === "failure").length };
+  };
   const names = new Map(people.map((person) => [person.login, person.name]));
   const latestScopeScan = new Map<string, number>();
   for (const scan of scans) {
@@ -125,24 +139,24 @@ export function buildOrganizationSnapshot(filters: { range: string; search: stri
   }
   const incidents = [...incidentMap.values()];
   const repoNames = new Set([...repoRows.map((repo) => repo.full_name), ...scans.map((scan) => scan.repository)]);
-  const employeeNames = new Set([...people.map((person) => person.login), ...scans.map((scan) => scan.actor)]);
+  const employeeNames = new Set([...people.map((person) => person.login), ...scans.map((scan) => scan.actor), ...workflowChecks.map((run) => run.actor)]);
   const employeeRows: EmployeeRisk[] = [...employeeNames].map((login) => {
     const mine = scans.filter((scan) => scan.actor === login);
     const mineIncidents = incidents.filter((incident) => incident.employee === login);
     const mineOpen = mineIncidents.filter((incident) => incident.status === "open");
     const mineFixed = mineIncidents.length - mineOpen.length;
-    const repos = [...new Set([...memberships.filter((member) => member.login === login).map((member) => member.repository), ...mine.map((scan) => scan.repository)])];
-    const clean = mine.filter((scan) => scan.gate_status === "passed").length;
-    const repositories = repos.map((repository) => { const checks = mine.filter((scan) => scan.repository === repository); const errors = mineIncidents.filter((incident) => incident.repository === repository).length; const passed = checks.filter((scan) => scan.gate_status === "passed").length; return { repository, checks: checks.length, cleanRate: checks.length ? Math.round(passed / checks.length * 100) : 100, errors, blocked: checks.filter((scan) => scan.gate_status === "blocked").length }; });
-    const cleanRate = mine.length ? Math.round(clean / mine.length * 100) : 100;
-    return { login, name: names.get(login) ?? login, avatar: login[0]?.toUpperCase() ?? "?", scans: mine.length, blocked: mine.filter((scan) => scan.gate_status === "blocked").length, open: mineOpen.length, fixed: mineFixed, fixRate: mineIncidents.length ? Math.round(mineFixed / mineIncidents.length * 100) : 100, cleanRate, avgFixHours: 0, score: Math.max(0, cleanRate - mineOpen.length * 2), scoreDelta: 0, cleanRateDelta: 0, definite: mineOpen.filter((i) => i.confidence === "definite").length, likely: mineOpen.filter((i) => i.confidence === "likely").length, possible: mineOpen.filter((i) => i.confidence === "possible").length, repeats: Math.max(0, mineIncidents.length - new Set(mineIncidents.map((i) => i.resource)).size), topResource: mineOpen[0]?.resource ?? "None", repositories };
+    const repos = [...new Set([...memberships.filter((member) => member.login === login).map((member) => member.repository), ...mine.map((scan) => scan.repository), ...workflowChecks.filter((run) => run.actor === login).map((run) => run.repository)])];
+    const stats = checkStats(login);
+    const repositories = repos.map((repository) => { const checks = checkStats(login, repository); const errors = mineIncidents.filter((incident) => incident.repository === repository).length; return { repository, checks: checks.total, cleanRate: checks.total ? Math.round(checks.passed / checks.total * 100) : 0, errors, blocked: checks.blocked }; });
+    const cleanRate = stats.total ? Math.round(stats.passed / stats.total * 100) : 0;
+    return { login, name: names.get(login) ?? login, avatar: login[0]?.toUpperCase() ?? "?", scans: stats.total, blocked: stats.blocked, open: mineOpen.length, fixed: mineFixed, fixRate: mineIncidents.length ? Math.round(mineFixed / mineIncidents.length * 100) : 100, cleanRate, avgFixHours: 0, score: stats.total ? Math.max(0, cleanRate - mineOpen.length * 2) : 0, scoreDelta: 0, cleanRateDelta: 0, definite: mineOpen.filter((i) => i.confidence === "definite").length, likely: mineOpen.filter((i) => i.confidence === "likely").length, possible: mineOpen.filter((i) => i.confidence === "possible").length, repeats: Math.max(0, mineIncidents.length - new Set(mineIncidents.map((i) => i.resource)).size), topResource: mineOpen[0]?.resource ?? "None", repositories };
   });
   const activity = workflows.map((run) => ({ repository: run.repository, id: run.run_id, employee: run.actor, branch: run.branch, workflow: run.workflow, status: run.status, conclusion: run.conclusion ?? "pending", createdAt: run.created_at, runUrl: run.run_url ?? undefined }));
   const repositoryRows: RepositoryRisk[] = [...repoNames].map((fullName) => {
     const row = repoRows.find((repo) => repo.full_name === fullName); const repoScans = scans.filter((scan) => scan.repository === fullName); const repoIncidents = incidents.filter((incident) => incident.repository === fullName);
-    const memberLogins = [...new Set([...memberships.filter((member) => member.repository === fullName).map((member) => member.login), ...repoScans.map((scan) => scan.actor)])];
-    const members = memberLogins.map((login) => { const checks = repoScans.filter((scan) => scan.actor === login); const errors = repoIncidents.filter((incident) => incident.employee === login).length; const clean = checks.filter((scan) => scan.gate_status === "passed").length; return { login, checks: checks.length, cleanRate: checks.length ? Math.round(clean / checks.length * 100) : 100, errors, blocked: checks.filter((scan) => scan.gate_status === "blocked").length }; });
-    const open = repoIncidents.filter((incident) => incident.status === "open").length; return { name: fullName, language: row?.language ?? "Unknown", open, blockedPrs: repoScans.filter((scan) => scan.gate_status === "blocked").length, scans: repoScans.length, risk: open > 10 ? "critical" : open ? "high" : "low", members, teams: members.length ? [{ name: "Repository contributors", lead: members[0].login, members: members.map((m) => m.login), cleanRate: Math.round(members.reduce((s,m) => s + m.cleanRate, 0) / members.length), open, blocked: repoScans.filter((scan) => scan.gate_status === "blocked").length }] : [], activity: activity.filter((entry) => entry.repository === fullName) };
+    const memberLogins = [...new Set([...memberships.filter((member) => member.repository === fullName).map((member) => member.login), ...repoScans.map((scan) => scan.actor), ...workflowChecks.filter((run) => run.repository === fullName).map((run) => run.actor)])];
+    const members = memberLogins.map((login) => { const checks = checkStats(login, fullName); const errors = repoIncidents.filter((incident) => incident.employee === login).length; return { login, checks: checks.total, cleanRate: checks.total ? Math.round(checks.passed / checks.total * 100) : 0, errors, blocked: checks.blocked }; });
+    const repoStats = checkStats(undefined, fullName); const open = repoIncidents.filter((incident) => incident.status === "open").length; const measuredMembers = members.filter((member) => member.checks); return { name: fullName, language: row?.language ?? "Unknown", open, blockedPrs: repoStats.blocked, scans: repoStats.total, risk: open > 10 ? "critical" : open ? "high" : "low", members, teams: members.length ? [{ name: "Repository contributors", lead: members[0].login, members: members.map((m) => m.login), cleanRate: measuredMembers.length ? Math.round(measuredMembers.reduce((s,m) => s + m.cleanRate, 0) / measuredMembers.length) : 0, open, blocked: repoStats.blocked }] : [], activity: activity.filter((entry) => entry.repository === fullName) };
   });
   const tokens = filters.search.toLowerCase().split(/\s+/).filter(Boolean);
   const match = (...values: string[]) => !tokens.length || tokens.every((token) => values.join(" ").toLowerCase().includes(token));
@@ -153,9 +167,10 @@ export function buildOrganizationSnapshot(filters: { range: string; search: stri
   const dayMap = new Map<string, { opened: number; fixed: number; blocked: number; scans: number; passed: number }>();
   for (const scan of scans) { const date = scan.detected_at.slice(0, 10); const point = dayMap.get(date) ?? { opened: 0, fixed: 0, blocked: 0, scans: 0, passed: 0 }; point.opened += scan.total; point.blocked += scan.gate_status === "blocked" ? 1 : 0; point.scans += 1; point.passed += scan.gate_status === "passed" ? 1 : 0; dayMap.set(date, point); }
   const trend = [...dayMap.entries()].sort().map(([date, point]) => ({ date, opened: point.opened, fixed: point.fixed, blocked: point.blocked, accuracy: point.scans ? Math.round(point.passed / point.scans * 100) : 100 }));
-  const blocked = scans.filter((scan) => scan.gate_status === "blocked").length;
-  const passed = scans.length - blocked;
+  const allStats = checkStats();
+  const blocked = allStats.blocked;
+  const passed = allStats.passed;
   const openIncidents = incidents.filter((incident) => incident.status === "open").length;
   const fixedIncidents = incidents.length - openIncidents;
-  return { organization: process.env.LEAKGUARD_GITHUB_ORG ?? repoRows[0]?.full_name.split("/")[0] ?? "LeakGuard Organization", source: "control-plane", generatedAt: new Date().toISOString(), metrics: { employees: employeeRows.length, repositories: repositoryRows.length, open: openIncidents, blockedPrs: blocked, fixRate: incidents.length ? Math.round(fixedIncidents / incidents.length * 100) : 100, scans: scans.length, cleanRate: scans.length ? Math.round(passed / scans.length * 100) : 100, cleanRateDelta: 0, openDelta: 0, githubFailures: workflows.filter((run) => run.conclusion === "failure").length }, employees: filteredEmployees.slice(start, start + filters.pageSize), repositories: filteredRepos.slice(start, start + filters.pageSize), incidents: filteredIncidents.slice(start, start + filters.pageSize), trend, pagination: { page: filters.page, pageSize: filters.pageSize, totalEmployees: filteredEmployees.length, totalRepositories: filteredRepos.length, totalIncidents: filteredIncidents.length } };
+  return { organization: process.env.LEAKGUARD_GITHUB_ORG ?? repoRows[0]?.full_name.split("/")[0] ?? "LeakGuard Organization", source: "control-plane", generatedAt: new Date().toISOString(), metrics: { employees: employeeRows.length, repositories: repositoryRows.length, open: openIncidents, blockedPrs: blocked, fixRate: incidents.length ? Math.round(fixedIncidents / incidents.length * 100) : 100, scans: allStats.total, cleanRate: allStats.total ? Math.round(passed / allStats.total * 100) : 0, cleanRateDelta: 0, openDelta: 0, githubFailures: workflows.filter((run) => run.conclusion === "failure").length }, employees: filteredEmployees.slice(start, start + filters.pageSize), repositories: filteredRepos.slice(start, start + filters.pageSize), incidents: filteredIncidents.slice(start, start + filters.pageSize), trend, pagination: { page: filters.page, pageSize: filters.pageSize, totalEmployees: filteredEmployees.length, totalRepositories: filteredRepos.length, totalIncidents: filteredIncidents.length } };
 }
