@@ -170,11 +170,11 @@ async function applyVerifiedFix(uri: vscode.Uri, quiet = false): Promise<boolean
 }
 
 /**
- * Fix every file at once.
+ * Fix every leak the rewriter can prove, across the whole workspace.
  *
- * This rewrites source across the workspace, so it confirms first and names
- * the exact count. Running the equivalent CLI command against a directory by
- * accident is how a seeded test corpus gets silently "fixed" into passing.
+ * Confirms first and names the exact count, because this rewrites source in
+ * place - running the equivalent CLI command against a directory by accident
+ * is how a seeded test corpus gets silently "fixed" into passing.
  */
 async function fixWholeProject(): Promise<void> {
   const root = workspaceRoot();
@@ -183,52 +183,70 @@ async function fixWholeProject(): Promise<void> {
     return;
   }
 
-  if (!findingsByUri.size) await scanWorkspace();
+  await scanWorkspace({ quiet: true });
 
-  const targets = [...findingsByUri.entries()]
-    .filter(([, findings]) => findings.some((finding) => finding.fix_available))
-    .map(([key]) => vscode.Uri.parse(key));
+  const countFixable = () =>
+    [...findingsByUri.values()].flat().filter((finding) => finding.fix_available).length;
 
-  if (!targets.length) {
+  const before = panel.total;
+  const fixable = countFixable();
+  if (!fixable) {
     void vscode.window.showInformationMessage(
-      "LeakGuard: nothing to fix automatically. Remaining findings need the AI suggestion or a manual change.",
+      before
+        ? `LeakGuard: none of the ${before} remaining finding(s) can be rewritten automatically. They need the AI suggestion or a manual change.`
+        : "LeakGuard: no leaks found.",
     );
     return;
   }
 
-  const fixable = [...findingsByUri.values()]
-    .flat()
-    .filter((finding) => finding.fix_available).length;
-
   const choice = await vscode.window.showWarningMessage(
-    `Rewrite ${fixable} leak(s) across ${targets.length} file(s)?`,
-    { modal: true, detail: "Each rewrite is re-analysed and kept only if the leak is provably gone. Commit or stash first if you want an easy way back." },
+    `Rewrite ${fixable} leak(s)?`,
+    {
+      modal: true,
+      detail:
+        "Every rewrite is re-analysed and kept only if the leak is provably gone. " +
+        "Commit or stash first if you want an easy way back.",
+    },
     "Fix all",
   );
   if (choice !== "Fix all") return;
 
-  let changed = 0;
+  // Fixing one leak can expose another in the same file, and can make a shape
+  // the rewriter previously declined become rewritable. Keep going until a
+  // round stops making progress rather than settling for the first pass.
+  const MAX_ROUNDS = 5;
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: "LeakGuard: applying verified fixes", cancellable: false },
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "LeakGuard: applying verified fixes",
+      cancellable: false,
+    },
     async (progress) => {
-      for (const [index, uri] of targets.entries()) {
-        progress.report({
-          message: `${vscode.workspace.asRelativePath(uri)} (${index + 1}/${targets.length})`,
-          increment: 100 / targets.length,
-        });
-        if (await applyVerifiedFix(uri, true)) changed += 1;
+      for (let round = 1; round <= MAX_ROUNDS; round += 1) {
+        const targets = [...findingsByUri.entries()]
+          .filter(([, findings]) => findings.some((finding) => finding.fix_available))
+          .map(([key]) => vscode.Uri.parse(key));
+        if (!targets.length) return;
+
+        progress.report({ message: `round ${round} - ${targets.length} file(s)` });
+        const remainingBefore = countFixable();
+        for (const uri of targets) await applyVerifiedFix(uri, true);
+        await scanWorkspace({ quiet: true });
+        if (countFixable() >= remainingBefore) return;
       }
     },
   );
 
-  await scanWorkspace();
+  await scanWorkspace({ quiet: true });
   const left = panel.total;
   void vscode.window.showInformationMessage(
-    left
-      ? `LeakGuard: fixed ${changed} file(s). ${left} finding(s) remain - those need the AI suggestion or a manual change.`
-      : `LeakGuard: fixed ${changed} file(s). No leaks remain.`,
+    left === 0
+      ? `LeakGuard: fixed all ${before} leak(s). None remain.`
+      : `LeakGuard: fixed ${before - left} of ${before} leak(s). ${left} remain that cannot be ` +
+        "rewritten automatically - they need the AI suggestion or a manual change.",
   );
 }
+
 
 /**
  * AI fallback - only for findings the deterministic rewriter declined.

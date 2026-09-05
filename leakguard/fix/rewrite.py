@@ -13,70 +13,138 @@ from leakguard.core.finding import Finding
 _ASSIGNMENT = re.compile(r"^(?P<indent>[ \t]*)(?P<variable>[A-Za-z_]\w*)\s*=\s*(?P<call>.+?)\s*$")
 
 
-def make_patch(finding: Finding, source: str) -> str | None:
-    """Hoist one simple ``x = call(); ...; x.close()`` range into ``with``.
-
-    This transformation preserves every line between acquisition and close.  It is
-    intentionally unavailable for source shapes it cannot prove safe to rewrite;
-    callers must use :func:`verified_patch` before presenting a result.
-    """
-
-    if finding.escape_kind is not None:
-        return None
-    lines = source.splitlines(keepends=True)
-    start = finding.acquired_line - 1
-    if not (0 <= start < len(lines)):
-        return None
-    match = _ASSIGNMENT.match(lines[start].rstrip("\r\n"))
-    if not match or match.group("variable") != finding.variable:
-        return None
-    indent = match.group("indent")
-    inner_indent = indent + "    "
-    if finding.close_found_at:
-        end = finding.close_found_at[0] - 1
-        if not (start < end < len(lines)):
-            return None
-        close = re.compile(rf"^[ \t]*{re.escape(finding.variable)}\.(close|shutdown)\(\)\s*(?:#.*)?$")
-        if close.match(lines[end].rstrip("\r\n")):
-            body = [inner_indent + line[len(indent):] if line.strip() else line for line in lines[start + 1:end]]
-            if finding.resource == "builtins.file":
-                replacement = [f"{indent}with {match.group('call')} as {finding.variable}:\n", *body]
-            else:
-                close_text = lines[end][len(indent):] if lines[end].startswith(indent) else lines[end].lstrip()
-                replacement = [lines[start], f"{indent}try:\n", *body,
-                               f"{indent}finally:\n", f"{inner_indent}{close_text}"]
-            return "".join(lines[:start] + replacement + lines[end + 1:])
-
-    # Conservative fallback: protect the remaining statements in the same
-    # lexical suite with finally. Verification below rejects unsafe rewrites.
+def _suite_end(lines: list[str], start: int, indent: str) -> int:
+    """Index just past the last line of the suite the acquisition sits in."""
     end = start + 1
     while end < len(lines):
         text = lines[end]
         if text.strip() and len(text) - len(text.lstrip(" \t")) < len(indent):
             break
         end += 1
+    return end
+
+
+def _reindent(lines: list[str], indent: str, extra: str = "    ") -> list[str]:
+    return [indent + extra + line[len(indent):] if line.strip() else line for line in lines]
+
+
+def candidate_patches(finding: Finding, source: str) -> list[str]:
+    """Every rewrite worth trying for this finding, best first.
+
+    Returned candidates are not guaranteed correct - some will not even parse.
+    :func:`verified_patch` re-runs the analyzer on each and keeps the first
+    that provably removes the leak, so an unsound rewrite is discarded rather
+    than shipped.
+    """
+    if finding.escape_kind is not None:
+        return []
+
+    lines = source.splitlines(keepends=True)
+    start = finding.acquired_line - 1
+    if not (0 <= start < len(lines)):
+        return []
+
+    match = _ASSIGNMENT.match(lines[start].rstrip("\r\n"))
+    if not match or match.group("variable") != finding.variable:
+        return []
+
+    indent = match.group("indent")
+    inner = indent + "    "
+    candidates: list[str] = []
+
+    close_pattern = re.compile(
+        rf"^(?P<indent>[ \t]*){re.escape(finding.variable)}\.(close|shutdown)\(\)\s*(?:#.*)?$"
+    )
+
+    if finding.close_found_at:
+        end = finding.close_found_at[0] - 1
+        if start < end < len(lines):
+            close_match = close_pattern.match(lines[end].rstrip("\r\n"))
+            # Only lift the close out when it is a sibling of the acquisition.
+            # A close nested inside `if verbose:` is the body of that branch;
+            # deleting it leaves a header with no suite, which does not parse.
+            sibling = close_match is not None and close_match.group("indent") == indent
+            if sibling:
+                body = _reindent(lines[start + 1:end], indent)
+                if finding.resource == "builtins.file":
+                    candidates.append("".join(
+                        lines[:start]
+                        + [f"{indent}with {match.group('call')} as {finding.variable}:\n", *body]
+                        + lines[end + 1:]
+                    ))
+                close_text = (lines[end][len(indent):] if lines[end].startswith(indent)
+                              else lines[end].lstrip())
+                candidates.append("".join(
+                    lines[:start]
+                    + [lines[start], f"{indent}try:\n", *body,
+                       f"{indent}finally:\n", f"{inner}{close_text}"]
+                    + lines[end + 1:]
+                ))
+
+    # General strategy: protect everything after the acquisition, in the same
+    # suite, with try/finally. This covers the shapes the sibling rewrite
+    # cannot touch - a close reached only on one branch, only inside an except
+    # handler, or a resource acquired once per loop iteration.
+    end = _suite_end(lines, start, indent)
     body = lines[start + 1:end]
-    if not body or not any(line.strip() for line in body):
-        return None
-    protected = [inner_indent + line[len(indent):] if line.strip() else line for line in body]
-    replacement = [lines[start], f"{indent}try:\n", *protected,
-                   f"{indent}finally:\n", f"{inner_indent}{finding.variable}.close()\n"]
-    return "".join(lines[:start] + replacement + lines[end:])
+    if body and any(line.strip() for line in body):
+
+        def wrap(inner_body: list[str]) -> str:
+            return "".join(
+                lines[:start]
+                + [lines[start], f"{indent}try:\n", *_reindent(inner_body, indent),
+                   f"{indent}finally:\n", f"{inner}{finding.variable}.close()\n"]
+                + lines[end:]
+            )
+
+        # Keeping the original close is harmless at runtime - close() is
+        # idempotent across the types we track - but a conditional close
+        # inside the try currently defeats the analyzer, which then reports
+        # the finally as unreachable and rejects an otherwise correct fix.
+        # So also offer the body with those closes removed, and with them
+        # replaced by `pass` for the case where the close was the whole suite
+        # of a branch and deleting it would leave a header with no body.
+        kept, dropped, blanked = [], [], []
+        for line in body:
+            kept.append(line)
+            if close_pattern.match(line.rstrip("\r\n")):
+                blanked.append(line[: len(line) - len(line.lstrip(" \t"))] + "pass\n")
+            else:
+                dropped.append(line)
+                blanked.append(line)
+
+        candidates.append(wrap(kept))
+        if dropped != kept and any(line.strip() for line in dropped):
+            candidates.append(wrap(dropped))
+        if blanked != kept:
+            candidates.append(wrap(blanked))
+
+    return candidates
+
+
+def make_patch(finding: Finding, source: str) -> str | None:
+    """The single best-guess rewrite, or None. Prefer :func:`verified_patch`."""
+    candidates = candidate_patches(finding, source)
+    return candidates[0] if candidates else None
 
 
 def verified_patch(
     finding: Finding, source: str, analyze_source: Callable[[str], Iterable[Finding]]
 ) -> str | None:
-    """Return a patch only if rerunning the analyzer removes this finding."""
+    """Return the first candidate the analyzer confirms removes this finding.
 
-    patched = make_patch(finding, source)
-    if patched is None:
-        return None
-    try:
-        remaining = {candidate.fingerprint for candidate in analyze_source(patched)}
-    except (SyntaxError, ValueError):
-        return None
-    return patched if finding.fingerprint not in remaining else None
+    The rewriter proposes; the analyzer judges. A candidate that fails to
+    parse, or that leaves the leak in place, is discarded silently and the
+    next one is tried.
+    """
+    for patched in candidate_patches(finding, source):
+        try:
+            remaining = {candidate.fingerprint for candidate in analyze_source(patched)}
+        except (SyntaxError, ValueError):
+            continue
+        if finding.fingerprint not in remaining:
+            return patched
+    return None
 
 
 #: A file with N independent leaks needs at most N rounds; the cap is a guard

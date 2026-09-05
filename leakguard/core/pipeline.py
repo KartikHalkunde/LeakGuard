@@ -86,7 +86,9 @@ def build_module_cfgs(module: _Module, catalog: Catalog, helpers: dict[str, str]
     return cfgs, params
 
 
-def analyze_source(source: str, file: str = "<memory>", config=None) -> list[Finding]:
+def analyze_source(
+    source: str, file: str = "<memory>", config=None, *, verify_fixes: bool = True
+) -> list[Finding]:
     path = Path(file)
     module = _Module(path, source, ast.parse(source, filename=file), {})
     module.aliases = import_aliases(module.tree)
@@ -97,7 +99,34 @@ def analyze_source(source: str, file: str = "<memory>", config=None) -> list[Fin
     safe_helpers = {name for name, summary in initial_summaries.items() if summary.closes_arg}
     cfgs, params = build_module_cfgs(module, catalog, helpers, safe_helpers)
     summaries = build_summaries(cfgs, params)
-    return [finding for cfg in cfgs.values() for finding in analyze_cfg(cfg, summaries)]
+    findings = [finding for cfg in cfgs.values() for finding in analyze_cfg(cfg, summaries)]
+    if verify_fixes:
+        _resolve_fix_availability(findings, source, file, config)
+    return findings
+
+
+def _resolve_fix_availability(
+    findings: list[Finding], source: str, file: str, config
+) -> None:
+    """Replace the guessed ``fix_available`` flag with a measured one.
+
+    The dataflow pass can only guess, from confidence alone, whether a leak is
+    fixable. That guess over-promises: a close nested inside a branch, or one
+    reached only from an except handler, has no sound rewrite, yet the flag
+    said otherwise. The editor then offered a fix that silently did nothing.
+
+    Here we actually attempt the rewrite. ``verify_fixes=False`` on the nested
+    call is what stops this recursing: verification analyses the patched
+    source, which would otherwise try to verify its own fixes forever.
+    """
+    from leakguard.fix.rewrite import verified_patch
+
+    def analyze(candidate: str) -> list[Finding]:
+        return analyze_source(candidate, file, config, verify_fixes=False)
+
+    for finding in findings:
+        if finding.fix_available:
+            finding.fix_available = verified_patch(finding, source, analyze) is not None
 
 
 def run_pipeline(paths: list[Path], config) -> list[Finding]:
