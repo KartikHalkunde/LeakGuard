@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --color-ink: 255 255 255;
+  --color-panel: 246 247 249;
+  --color-border: 226 231 237;
+  --color-muted: 100 112 128;
+  --color-fg: 15 20 26;
+}
+
+.dark {
+  color-scheme: dark;
+  --color-ink: 11 15 20;
+  --color-panel: 17 22 29;
+  --color-border: 30 39 50;
+  --color-muted: 139 152 165;
+  --color-fg: 255 255 255;
+}
+
+body {
+  background-color: rgb(var(--color-ink));
+  color: rgb(var(--color-fg));
+}
+
+/* Terminal and CFG-diagram surfaces are deliberately always dark, like a
+   code editor - they don't flip with the site theme. */
+.code-block {
+  background: #0d1117;
+  border: 1px solid #1e2732;
+  border-radius: 0.5rem;
+  padding: 1rem 1.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875rem;
+  overflow-x: auto;
+  white-space: pre;
+  color: #c9d1d9;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
