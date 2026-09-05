@@ -1,15 +1,13 @@
-import { sampleFp, sampleReport, sampleTrend } from "./sample";
-import type { FpPoint, Report, TrendPoint } from "./types";
+import { sampleReport } from "./sample";
+import type { Report } from "./types";
 
 const cache = new Map<string, { expires: number; value: unknown }>();
 const pending = new Map<string, Promise<unknown>>();
 const CACHE_MS = 30_000;
-const REMOTE_TIMEOUT_MS = 600;
 const LOCAL_DEV_TIMEOUT_MS = 10_000;
 
 async function request<T>(path: string, fallback: T): Promise<T> {
-  const remoteBase = process.env.NEXT_PUBLIC_CONTROL_PLANE_URL?.replace(/\/$/, "");
-  const base = remoteBase ?? "/api";
+  const base = "/api";
   const hit = cache.get(path);
   if (hit && hit.expires > Date.now()) return hit.value as T;
   const existing = pending.get(path);
@@ -18,7 +16,7 @@ async function request<T>(path: string, fallback: T): Promise<T> {
     const controller = new AbortController();
     // Local API routes may need a one-time dev compilation; keep the loader
     // visible instead of incorrectly replacing a real report with fixtures.
-    const timeoutMs = remoteBase ? REMOTE_TIMEOUT_MS : LOCAL_DEV_TIMEOUT_MS;
+    const timeoutMs = LOCAL_DEV_TIMEOUT_MS;
     const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(`${base}${path}`, {
@@ -40,9 +38,6 @@ async function request<T>(path: string, fallback: T): Promise<T> {
 }
 
 export const loadFindings = () => request<Report>("/findings", sampleReport);
-export const loadTrend = () => request<TrendPoint[]>("/trend", sampleTrend);
-export const loadFpRate = () => request<FpPoint[]>("/fp-rate", sampleFp);
-
 export async function scanRepository(): Promise<Report> {
   const response = await fetch("/api/scan", { method: "POST", headers: { Accept: "application/json" } });
   if (!response.ok) throw new Error(`Scan failed (${response.status})`);

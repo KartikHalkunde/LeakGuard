@@ -106,3 +106,8 @@ main,.admin-card,.employee-profile,.daily-panel { min-width:0;max-width:100% }
 .repo-select-card>em { min-width:52px;padding:4px 7px;border-radius:12px;background:#291a20;color:#ff9da5;font-size:8px;font-style:normal;text-align:center;text-transform:uppercase }
 @media(max-width:1100px){.profile-kpis{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:700px){.repository-selector-grid{grid-template-columns:1fr}.repository-browser-head{display:block}.repository-browser-head>small{display:block;margin:6px 0}.profile-kpis{grid-template-columns:repeat(2,1fr)}}
+.org-live-controls { display:flex;align-items:center;gap:9px }
+.org-live-controls>button { height:42px;padding:0 13px;border:1px solid #315071;border-radius:10px;background:#142238;color:#b9d8ff;cursor:pointer }
+.org-live-controls>button:disabled { opacity:.6;cursor:wait }
+.sync-warning { margin:0 0 14px;padding:10px 13px;border:1px solid #765623;border-radius:10px;background:#2b2110;color:#ffd878;font-size:11px }
+@media(max-width:700px){.org-live-controls{align-items:stretch;flex-direction:column;margin-bottom:16px}}

@@ -1,57 +1,51 @@
 # LeakGuard Organization
 
-LeakGuard Organization is a GitHub-native product. Employees install nothing:
-they push normally to personal branches and receive actionable findings in the
-pull-request check. Organization admins use the dashboard for portfolio-wide
-visibility and governance.
+LeakGuard Organization has two pieces: a required GitHub check for employees
+and an admin dashboard/control-plane service. Employees install nothing.
 
-## Enforcement lifecycle
+## What happens on every pull request
 
-1. An employee opens or updates a pull request targeting `main`.
-2. `LeakGuard Organization Gate` always creates the required status check, so
-   documentation-only PRs cannot get stuck waiting for a skipped workflow.
-3. The analyzer diffs the PR merge-base and scans only added, copied, modified
-   and renamed Python files. Unchanged, deleted and non-Python files are skipped;
-   a PR with no Python changes quickly reports a green zero-file scan.
-4. Definite and likely leaks fail the required check. Possible findings remain
-   review signals.
-5. The report carries repository, employee, branch, commit, base SHA, PR,
-   GitHub event and workflow URL to the control plane. Source code is never
-   uploaded.
-6. New commits trigger a fresh diff scan. The PR cannot merge until the latest
-   required check passes.
+1. An employee opens or updates a PR targeting `main`.
+2. `.github/workflows/organization-gate.yml` runs on GitHub-hosted runners.
+3. LeakGuard scans only changed Python files using the merge base. It does not
+   repeatedly scan unchanged files. If history is unavailable it fails safely
+   to a full scan.
+4. Definite or likely leaks make `Changed-code leak policy` fail. The Action
+   still uploads SARIF and sends a signed report to the control plane.
+5. The control plane attributes findings to GitHub actor, repository, branch,
+   commit, PR and run URL, and persists them in SQLite.
+6. A later clean scan on the same employee/repository/branch marks the previous
+   finding fixed. The dashboard polls every 15 seconds.
 
-If Git history is unavailable, LeakGuard falls back to a full scan instead of
-silently passing an unscanned change.
+## GitHub configuration
 
-## Required GitHub rule
+Set repository or organization Actions secrets:
 
-In repository **Settings → Rules → Rulesets**, create a rule targeting the
-default branch with:
+- `LEAKGUARD_CONTROL_PLANE_URL` =
+  `https://your-dashboard.example/api/control-plane`
+- `LEAKGUARD_SECRET` = the same signing secret used by the dashboard
 
-- Require a pull request before merging.
-- Require status checks to pass.
-- Add `Changed-code leak policy` as a required check.
-- Require the branch to be up to date.
-- Block force pushes and direct pushes.
-- Disable bypass for ordinary organization members.
+In **Settings → Rules → Rulesets**, target the default branch and require:
 
-The workflow produces the check; the GitHub ruleset is what makes a failed
-check technically prevent the merge.
+- pull requests before merging;
+- `Changed-code leak policy` status check;
+- the branch to be up to date;
+- blocked direct pushes and force pushes;
+- no ordinary-member bypass.
 
-## Admin dashboard
+The workflow creates the failing check. The ruleset is what prevents merge.
 
-The default dashboard route is the organization overview. It includes employee
-security ranking, repositories by exposure, blocked pull requests, remediation
-speed and attributed incidents. `/employees`, `/repositories` and `/incidents`
-provide focused views. Technical evidence remains under `/findings`, `/cfg`
-and `/fp-rate`.
+## Control plane and GitHub inventory
 
-Set `LEAKGUARD_CONTROL_PLANE_URL` and `LEAKGUARD_DASHBOARD_TOKEN` on the
-dashboard server to replace bundled demo organization data with the live
-`/organization/overview` response.
+The dashboard owns its backend and DB. `GITHUB_TOKEN` plus
+`LEAKGUARD_GITHUB_ORG` allow it to discover repositories, collaborators and
+recent workflow runs. A GitHub organization webhook provides immediate
+workflow updates; the API sync is the reconciliation/fallback path.
 
-Set these GitHub repository secrets for central ingestion:
+Required server variables and exact endpoints are documented in
+`dashboard/README.md`. A local dashboard cannot receive GitHub cloud callbacks;
+the control-plane URL must be a public HTTPS deployment with persistent disk.
 
-- `LEAKGUARD_CONTROL_PLANE_URL`
-- `LEAKGUARD_SECRET`
+Only Python resource analysis exists today. GitHub workflow status ingestion
+works for every repository/language, but Go/Java leak analysis has not been
+implemented and is not claimed.

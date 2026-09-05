@@ -16,10 +16,18 @@ export interface Incident {
 export interface DailySecurityPoint { date: string; accuracy: number; opened: number; fixed: number; blocked: number }
 export interface OrganizationSnapshot {
   organization: string; source: "control-plane" | "demo"; generatedAt: string;
-  metrics: { employees: number; repositories: number; open: number; blockedPrs: number; fixRate: number; scans: number; cleanRate: number; cleanRateDelta: number; openDelta: number };
+  metrics: { employees: number; repositories: number; open: number; blockedPrs: number; fixRate: number; scans: number; cleanRate: number; cleanRateDelta: number; openDelta: number; githubFailures?: number };
   employees: EmployeeRisk[]; repositories: RepositoryRisk[]; incidents: Incident[]; trend: DailySecurityPoint[];
   pagination?: { page: number; pageSize: number; totalEmployees: number; totalRepositories: number; totalIncidents: number };
+  syncError?: string;
 }
+
+export const emptyOrganizationSnapshot: OrganizationSnapshot = {
+  organization: "LeakGuard Organization", source: "control-plane", generatedAt: new Date(0).toISOString(),
+  metrics: { employees: 0, repositories: 0, open: 0, blockedPrs: 0, fixRate: 0, scans: 0, cleanRate: 100, cleanRateDelta: 0, openDelta: 0, githubFailures: 0 },
+  employees: [], repositories: [], incidents: [], trend: [],
+  pagination: { page: 1, pageSize: 25, totalEmployees: 0, totalRepositories: 0, totalIncidents: 0 },
+};
 
 const baseOrganizationSnapshot: OrganizationSnapshot = {
   organization: "CodeBlooded Engineering", source: "demo", generatedAt: "2026-09-05T09:30:00.000Z",

@@ -7,6 +7,7 @@ dist/
 venv/
 env/
 .pytest_cache/
+.test-tmp*/
 .coverage
 htmlcov/
 .mypy_cache/
@@ -16,6 +17,7 @@ htmlcov/
 leakguard.sarif
 leakguard.json
 .leakguard-cache/
+.leakguard-data/
 
 # Editors
 .vscode/
@@ -31,6 +33,7 @@ node_modules/
 out/
 .next/
 *.vsix
+*.tsbuildinfo
 
 # Secrets
 .env

@@ -2,6 +2,7 @@
   "name": "leakguard-dashboard",
   "version": "0.1.0",
   "private": true,
+  "engines": { "node": ">=22.5" },
   "scripts": {
     "predev": "node scripts/prepare-dev.mjs",
     "dev": "next dev --port 3000",

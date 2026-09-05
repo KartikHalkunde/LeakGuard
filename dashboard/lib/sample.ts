@@ -1,4 +1,4 @@
-import type { FpPoint, Report, TrendPoint } from "./types";
+import type { Report } from "./types";
 
 export const sampleReport: Report = {
   version: "1.0",
@@ -28,16 +28,6 @@ export const sampleReport: Report = {
     },
   ],
 };
-
-export const sampleTrend: TrendPoint[] = [
-  { date: "Mon", open: 18, definite: 9 }, { date: "Tue", open: 15, definite: 7 },
-  { date: "Wed", open: 13, definite: 6 }, { date: "Thu", open: 9, definite: 3 },
-  { date: "Fri", open: 6, definite: 1 }, { date: "Today", open: 3, definite: 1 },
-];
-export const sampleFp: FpPoint[] = [
-  { date: "Week 1", rate: 14.2 }, { date: "Week 2", rate: 10.8 },
-  { date: "Week 3", rate: 7.1 }, { date: "Week 4", rate: 3.8 },
-];
 
 export const sampleMermaid = `graph TD
     B0["L8: conn = sqlite3.connect(db)"] --> B1{"L9: if not path"}

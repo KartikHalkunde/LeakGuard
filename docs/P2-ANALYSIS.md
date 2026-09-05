@@ -10,7 +10,7 @@
 
 ## Hour 2 deliverable — JSON fixtures for P3 and P4
 
-Dump five `Finding` objects to `tests/fixtures/findings.json` so P3 can build SARIF and n8n, and P4 can build the dashboard, against real-shaped data. Half an hour, unblocks two people.
+Dump five `Finding` objects to `tests/fixtures/findings.json` so P3 can build SARIF/control-plane ingestion and P4 can build the dashboard against real-shaped data.
 
 ---
 
@@ -303,7 +303,7 @@ Put this in `docs/02-decision-log.md` with a timestamp. It is the single best an
 
 ## Task 5 — `fix/rewrite.py` (Phase 3)
 
-**One module, three consumers:** `leakguard fix --write`, P4's VS Code 💡 quick-fix, P3's n8n PR bot. Write it once, they both call it.
+**One module, two consumers:** `leakguard fix --write` and P4's VS Code quick-fix.
 
 Exactly two transformations. Anything else → `fix_available = False`.
 
@@ -356,7 +356,7 @@ if patched and finding.fingerprint not in {f.fingerprint for f in analyze_source
 return None                 # discard silently
 ```
 
-**Never surface an unverified patch.** Re-run the analyzer on the patched source; if the finding isn't gone, throw the patch away. This is what makes the n8n fix-bot safe, and it's a direct callback to the fail-closed philosophy.
+**Never surface an unverified patch.** Re-run the analyzer on the patched source; if the finding isn't gone, throw the patch away.
 
 ---
 
@@ -381,7 +381,7 @@ Colour by confidence. Respect `NO_COLOR`.
 
 ### `report/json.py`
 
-The canonical format — P3's SARIF and n8n, and P4's VS Code and dashboard all consume it. **Keep it stable after hour 8.** Schema is in README Step 8.
+The canonical format — SARIF, signed control-plane ingestion, VS Code and dashboard all consume it. **Keep it stable after hour 8.**
 
 ---
 

@@ -9,7 +9,7 @@
 # MUST live at the repository root for the short `uses:` form to work.
 #
 # Design rule: the required path (scan -> SARIF -> pass/fail) never depends on
-# the optional path (control plane). If n8n is down, CI still behaves
+# the optional path (organization control plane). If it is down, CI still behaves
 # correctly.
 
 name: LeakGuard
@@ -41,7 +41,7 @@ inputs:
     required: false
     default: "3.11"
   control-plane:
-    description: Optional n8n control-plane base URL. Leave empty to disable.
+    description: Optional LeakGuard control-plane base URL (for example https://dashboard.example/api/control-plane).
     required: false
     default: ""
   upload-sarif:
@@ -110,7 +110,11 @@ runs:
         path = pathlib.Path("leakguard.json")
         payload = json.loads(path.read_text(encoding="utf-8"))
         context = payload.setdefault("context", {})
-        context["gate_status"] = "blocked" if os.environ["SCAN_CODE"] == "1" else "passed"
+        context["gate_status"] = (
+            "passed" if os.environ["SCAN_CODE"] == "0"
+            else "blocked" if os.environ["SCAN_CODE"] == "1"
+            else "error"
+        )
         context["scan_mode"] = "diff" if os.environ["INPUT_DIFF_ONLY"] == "true" else "full"
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         PY
@@ -141,13 +145,14 @@ runs:
       shell: bash
       env:
         LEAKGUARD_SECRET: ${{ env.LEAKGUARD_SECRET }}
+        LEAKGUARD_CONTROL_PLANE: ${{ inputs.control-plane }}
       run: |
         if [ -z "${LEAKGUARD_SECRET:-}" ]; then
           echo "LEAKGUARD_SECRET not set; skipping control-plane notify"
           exit 0
         fi
         SIG=$(leakguard sign leakguard.json)
-        curl -sf -X POST "${{ inputs.control-plane }}/ingest" \
+        curl -sf -X POST "${LEAKGUARD_CONTROL_PLANE%/}/ingest" \
           -H "Content-Type: application/json" \
           -H "X-LeakGuard-Signature: $SIG" \
           --max-time 10 \
@@ -157,16 +162,23 @@ runs:
     - name: Job summary
       if: always()
       shell: bash
+      env:
+        SUMMARY_EMPLOYEE: ${{ github.actor }}
+        SUMMARY_REPOSITORY: ${{ github.repository }}
+        SUMMARY_BRANCH: ${{ github.head_ref || github.ref_name }}
+        SUMMARY_SCAN_MODE: ${{ inputs.diff-only == 'true' && 'changed Python files only' || 'full repository' }}
+        SUMMARY_DEFINITE: ${{ steps.scan.outputs.definite }}
+        SUMMARY_TOTAL: ${{ steps.scan.outputs.total }}
       run: |
         {
           echo "### LeakGuard"
           echo ""
-          echo "- employee: @${{ github.actor }}"
-          echo "- repository: ${{ github.repository }}"
-          echo "- branch: ${{ github.head_ref || github.ref_name }}"
-          echo "- scan mode: ${{ inputs.diff-only == 'true' && 'changed Python files only' || 'full repository' }}"
-          echo "- definite: ${{ steps.scan.outputs.definite }}"
-          echo "- total (after baseline): ${{ steps.scan.outputs.total }}"
+          echo "- employee: @$SUMMARY_EMPLOYEE"
+          echo "- repository: $SUMMARY_REPOSITORY"
+          echo "- branch: $SUMMARY_BRANCH"
+          echo "- scan mode: $SUMMARY_SCAN_MODE"
+          echo "- definite: $SUMMARY_DEFINITE"
+          echo "- total (after baseline): $SUMMARY_TOTAL"
         } >> "$GITHUB_STEP_SUMMARY"
 
     # Deliberately last: findings and analyzer failures both block protected
@@ -174,10 +186,13 @@ runs:
     - name: Enforce
       if: steps.scan.outputs.code != '0'
       shell: bash
+      env:
+        SCAN_CODE: ${{ steps.scan.outputs.code }}
+        FAIL_ON: ${{ inputs.fail-on }}
       run: |
-        if [ "${{ steps.scan.outputs.code }}" = "1" ]; then
-          echo "::error::LeakGuard found resource leaks at or above the '${{ inputs.fail-on }}' threshold"
+        if [ "$SCAN_CODE" = "1" ]; then
+          echo "::error::LeakGuard found resource leaks at or above the '$FAIL_ON' threshold"
         else
-          echo "::error::LeakGuard could not complete the scan (exit ${{ steps.scan.outputs.code }}); merge blocked"
+          echo "::error::LeakGuard could not complete the scan (exit $SCAN_CODE); merge blocked"
         fi
         exit 1

@@ -16,7 +16,7 @@
 | VS Code diagnostics and quick-fix | Compiled and unit tested |
 | Dashboard and local report APIs | Production build and CI verified |
 | Realistic demo repository | 10 seeded findings + safe examples |
-| Scan history | Complete: append-only local history; optional n8n/Postgres adapter included |
+| Organization control plane | Signed ingestion, GitHub sync/webhook and SQLite persistence implemented in the dashboard |
 
 ## Measured evidence
 
@@ -45,10 +45,9 @@ cd dashboard && npm run dev
 ```
 
 The strict demo scan intentionally exits `1`. Show the witness path, preview a
-verified fix, then open the dashboard and use **Scan now** to refresh the same
-report. Every dashboard scan appends to `.leakguard-cache/dashboard-history.json`
-and immediately refreshes the trend. The dashboard visibly distinguishes live
-report data from fallback fixtures.
+verified fix, then open the technical findings page to read the same report.
+The organization dashboard reads only its live embedded database; seed data is
+kept solely in test fixtures and is never presented as a live organization.
 
 ## Trigger points
 
@@ -58,8 +57,8 @@ report data from fallback fixtures.
 - The root **Demo Leak Gate** scans `demo-repo/app` separately and is expected
   to fail red because those ten leaks are intentional. The analyzer self-scan
   covers only production code under `leakguard/`.
-- The dashboard scans only when **Scan now** is pressed; otherwise it reads the
-  latest `leakguard.json` and never executes arbitrary user-provided paths.
+- The technical findings page scans only when **Scan now** is pressed; the
+  organization pages read the control-plane database and never execute code.
 
 ## Before judging
 

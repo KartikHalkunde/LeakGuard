@@ -300,7 +300,7 @@ Four screens, in priority order:
 
 Mermaid renders client-side with `mermaid.initialize()` — no server work.
 
-Data comes from P3's n8n endpoints: `GET /findings`, `GET /trend`, `GET /fp-rate`. **Build against P2's JSON fixtures from hour 14** so you never wait on the control plane.
+Data comes from the dashboard's in-repo control-plane APIs. **Build against P2's JSON fixtures from hour 14** so interface work never waits on deployment.
 
 **Cut order if behind:** FP-rate trend → findings table → leak debt. **Protect the CFG view** — it's the one visual no competing team can produce.
 

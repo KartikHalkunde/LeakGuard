@@ -4,7 +4,6 @@ import { promisify } from "node:util";
 import { basename, resolve } from "node:path";
 import { NextResponse } from "next/server";
 import type { Report } from "@/lib/types";
-import { recordScan } from "@/lib/scanHistory";
 
 export const dynamic = "force-dynamic";
 const run = promisify(execFile);
@@ -30,7 +29,6 @@ export async function POST() {
       source: "live-report",
       generated_at: info.mtime.toISOString(),
     };
-    await recordScan(report);
     return NextResponse.json(report);
   } catch (reason) {
     return NextResponse.json({ error: reason instanceof Error ? reason.message : "Scan failed" }, { status: 500 });
