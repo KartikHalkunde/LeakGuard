@@ -310,6 +310,138 @@ async function applyAiFix(uri: vscode.Uri, finding: Finding): Promise<void> {
   void vscode.window.showInformationMessage("LeakGuard applied the verified AI fix.");
 }
 
+/**
+ * Ask the model to fix everything the deterministic rewriter declined.
+ *
+ * One request per finding, applied without a per-file prompt - but each
+ * suggestion still goes through the same local verification as the single-fix
+ * path, so an unverified patch is dropped rather than written. The user
+ * confirms once, up front, because this both spends money and rewrites source.
+ */
+async function fixRemainingWithAi(): Promise<void> {
+  const root = workspaceRoot();
+  if (!root) {
+    void vscode.window.showWarningMessage("LeakGuard: open a folder first - there is nothing to fix.");
+    return;
+  }
+
+  const config = aiConfig();
+  if (!config.enabled || !config.apiKey) {
+    const choice = await vscode.window.showInformationMessage(
+      config.enabled
+        ? "No OpenAI key. Set leakguard.openai.apiKey or the OPENAI_API_KEY variable."
+        : "AI suggestions are switched off. Enable them to fix the remaining leaks.",
+      "Open settings",
+    );
+    if (choice) void vscode.commands.executeCommand("workbench.action.openSettings", "leakguard.openai");
+    return;
+  }
+
+  await scanWorkspace({ quiet: true });
+
+  const targets: { uri: vscode.Uri; finding: Finding }[] = [];
+  for (const [key, findings] of findingsByUri) {
+    const uri = vscode.Uri.parse(key);
+    for (const finding of findings) {
+      if (!finding.fix_available) targets.push({ uri, finding });
+    }
+  }
+
+  if (!targets.length) {
+    void vscode.window.showInformationMessage(
+      panel.total
+        ? "LeakGuard: every remaining finding already has a verified rewrite - run Fix Whole Project."
+        : "LeakGuard: no leaks found.",
+    );
+    return;
+  }
+
+  const choice = await vscode.window.showWarningMessage(
+    `Ask the model to fix ${targets.length} leak(s)?`,
+    {
+      modal: true,
+      detail:
+        `${targets.length} request(s) to OpenAI, one per leak. Only the enclosing function is sent, ` +
+        "never the whole file. Every suggestion is re-analysed locally and applied only if the leak " +
+        "is provably gone. Commit or stash first if you want an easy way back.",
+    },
+    "Fix with AI",
+  );
+  if (choice !== "Fix with AI") return;
+
+  let applied = 0;
+  let declined = 0;
+  const failures: string[] = [];
+
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "LeakGuard: asking the model, verifying each answer",
+      cancellable: true,
+    },
+    async (progress, token) => {
+      for (const [index, { uri, finding }] of targets.entries()) {
+        if (token.isCancellationRequested) return;
+        progress.report({
+          message: `${index + 1}/${targets.length} - ${finding.function}()`,
+          increment: 100 / targets.length,
+        });
+
+        try {
+          // Re-read: an earlier fix in this file has shifted everything below it.
+          const document = await vscode.workspace.openTextDocument(uri);
+          const fresh = (await analyzeFile(uri)).find(
+            (item) => item.function === finding.function && item.variable === finding.variable,
+          );
+          if (!fresh) continue; // already resolved by a previous suggestion
+
+          const suggestion = await suggest(config, document.getText(), fresh);
+          if (!suggestion) {
+            declined += 1;
+            continue;
+          }
+
+          const edit = new vscode.WorkspaceEdit();
+          edit.replace(uri, new vscode.Range(0, 0, document.lineCount, 0), suggestion.patchedSource);
+          await vscode.workspace.applyEdit(edit);
+          await (await vscode.workspace.openTextDocument(uri)).save();
+          applied += 1;
+        } catch (error) {
+          failures.push(`${finding.function}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    },
+  );
+
+  await scanWorkspace({ quiet: true });
+
+  const parts = [`LeakGuard: applied ${applied} AI fix(es)`];
+  if (declined) parts.push(`${declined} suggestion(s) discarded because the analyzer still saw the leak`);
+  if (failures.length) parts.push(`${failures.length} request(s) failed`);
+  parts.push(`${panel.total} finding(s) remain`);
+
+  const message = parts.join("; ") + ".";
+  if (failures.length) {
+    const choice = await vscode.window.showWarningMessage(message, "Show errors");
+    if (choice) {
+      const doc = await vscode.workspace.openTextDocument({ content: failures.join(String.fromCharCode(10)), language: "log" });
+      await vscode.window.showTextDocument(doc, { preview: true });
+    }
+  } else {
+    void vscode.window.showInformationMessage(message);
+  }
+}
+
+/** Findings for one file, fresh from the analyzer. */
+async function analyzeFile(uri: vscode.Uri): Promise<Finding[]> {
+  try {
+    const stdout = await run(["check", uri.fsPath, "--format", "json", "--fail-on", "never", "--no-baseline"]);
+    return parseReport(stdout).findings;
+  } catch {
+    return [];
+  }
+}
+
 class FixProvider implements vscode.CodeActionProvider {
   provideCodeActions(
     document: vscode.TextDocument,
@@ -501,6 +633,7 @@ function activateInner(context: vscode.ExtensionContext): void {
       if (target instanceof FindingNode) return applyAiFix(target.uri, target.finding);
     }),
     vscode.commands.registerCommand("leakguard.fixAll", () => void fixWholeProject()),
+    vscode.commands.registerCommand("leakguard.aiFixAll", () => void fixRemainingWithAi()),
 
     vscode.commands.registerCommand("leakguard.enableProtection", () => void enableProtection()),
     vscode.commands.registerCommand("leakguard.disableProtection", async () => {

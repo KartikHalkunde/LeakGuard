@@ -32,7 +32,8 @@
     "workspaceContains:**/*.py",
     "onView:leakguard.findings",
     "onCommand:leakguard.scanWorkspace",
-    "onCommand:leakguard.enableProtection"
+    "onCommand:leakguard.enableProtection",
+    "onCommand:leakguard.aiFixAll"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -57,7 +58,7 @@
     "viewsWelcome": [
       {
         "view": "leakguard.findings",
-        "contents": "No leaks found in this workspace.\n\n[Scan workspace](command:leakguard.scanWorkspace)\n\n[Fix whole project](command:leakguard.fixAll)\n\n[Enable commit protection](command:leakguard.enableProtection)\n\nLeakGuard checks every path through each function, including exception paths."
+        "contents": "No leaks found in this workspace.\n\n[Scan workspace](command:leakguard.scanWorkspace)\n\n[Fix whole project](command:leakguard.fixAll)\n\n[Fix remaining with AI](command:leakguard.aiFixAll)\n\n[Enable commit protection](command:leakguard.enableProtection)"
       }
     ],
     "commands": [
@@ -89,6 +90,12 @@
         "title": "Fix Whole Project",
         "category": "LeakGuard",
         "icon": "$(check-all)"
+      },
+      {
+        "command": "leakguard.aiFixAll",
+        "title": "Fix Remaining with AI",
+        "category": "LeakGuard",
+        "icon": "$(sparkle)"
       },
       {
         "command": "leakguard.enableProtection",
@@ -127,19 +134,24 @@
           "group": "navigation@2"
         },
         {
-          "command": "leakguard.commit",
+          "command": "leakguard.aiFixAll",
           "when": "view == leakguard.findings",
           "group": "navigation@3"
         },
         {
+          "command": "leakguard.commit",
+          "when": "view == leakguard.findings",
+          "group": "navigation@4"
+        },
+        {
           "command": "leakguard.enableProtection",
           "when": "view == leakguard.findings && !leakguard.protected",
-          "group": "navigation@4"
+          "group": "navigation@5"
         },
         {
           "command": "leakguard.disableProtection",
           "when": "view == leakguard.findings && leakguard.protected",
-          "group": "navigation@4"
+          "group": "navigation@6"
         }
       ],
       "view/item/context": [
@@ -215,7 +227,15 @@
           "description": "OpenAI model used for fix suggestions."
         }
       }
-    }
+    },
+    "activationEvents": [
+      "onLanguage:python",
+      "workspaceContains:**/*.py",
+      "onView:leakguard.findings",
+      "onCommand:leakguard.scanWorkspace",
+      "onCommand:leakguard.enableProtection",
+      "onCommand:leakguard.aiFixAll"
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",
