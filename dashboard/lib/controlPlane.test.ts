@@ -64,4 +64,51 @@ describe("organization control plane", () => {
     expect(leaky).toMatchObject({ scans: 1, cleanRate: 0, blocked: 1 });
     expect(clean).toMatchObject({ scans: 1, cleanRate: 100, blocked: 0 });
   });
+
+  it("charts a day per day in the range and credits a red-to-green fix", () => {
+    const repository = "acme/api";
+    upsertRepository({ full_name: repository, name: "api", language: "Python" });
+    const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
+    upsertWorkflowRun({ id: 201, actor: { login: "dev-a" }, head_branch: "feat/leak", name: "LeakGuard", status: "completed", conclusion: "failure", created_at: hoursAgo(5) }, repository);
+    upsertWorkflowRun({ id: 202, actor: { login: "dev-a" }, head_branch: "feat/leak", name: "LeakGuard", status: "completed", conclusion: "success", created_at: hoursAgo(2) }, repository);
+
+    const snapshot = buildOrganizationSnapshot({ range: "7d", search: "", repository: "all", employee: "all", page: 1, pageSize: 25 });
+    // One point per day, present whether or not anything happened that day.
+    expect(snapshot.trend).toHaveLength(7);
+    expect(snapshot.trend.at(-1)?.date).toBe("Today");
+    const sum = (key: "opened" | "fixed" | "blocked") => snapshot.trend.reduce((total, point) => total + point[key], 0);
+    expect(sum("opened")).toBe(1);
+    expect(sum("blocked")).toBe(1);
+    // The success after the failure is the fix; nothing else records remediation.
+    expect(sum("fixed")).toBe(1);
+    expect(snapshot.employees[0]).toMatchObject({ login: "dev-a", avgFixHours: 3 });
+    expect(snapshot.employees[0].daily).toHaveLength(7);
+  });
+
+  it("records a failed check as an incident when no signed report arrived", () => {
+    const repository = "acme/api";
+    upsertRepository({ full_name: repository, name: "api", language: "Python" });
+    upsertWorkflowRun({ id: 301, actor: { login: "dev-b" }, head_branch: "feat/open", name: "LeakGuard", status: "completed", conclusion: "failure", html_url: "https://github.example/runs/301", created_at: new Date().toISOString() }, repository);
+
+    const snapshot = buildOrganizationSnapshot({ range: "7d", search: "", repository: "all", employee: "all", page: 1, pageSize: 25 });
+    expect(snapshot.incidents).toHaveLength(1);
+    expect(snapshot.incidents[0]).toMatchObject({ id: "RUN-301", employee: "dev-b", status: "open", gate: "blocked", runUrl: "https://github.example/runs/301" });
+    // No finding-level detail is invented; the reason says where it lives.
+    expect(snapshot.incidents[0].reason).toContain("run log");
+    expect(snapshot.metrics.open).toBe(1);
+  });
+
+  it("keeps bot identities out of the employee leaderboard", () => {
+    const repository = "acme/api";
+    upsertRepository({ full_name: repository, name: "api", language: "Python" });
+    const createdAt = new Date().toISOString();
+    upsertWorkflowRun({ id: 401, actor: { login: "dependabot[bot]" }, head_branch: "deps", name: "CI", status: "completed", conclusion: "success", created_at: createdAt }, repository);
+    upsertWorkflowRun({ id: 402, actor: { login: "dev-c" }, head_branch: "feat/x", name: "CI", status: "completed", conclusion: "success", created_at: createdAt }, repository);
+
+    const snapshot = buildOrganizationSnapshot({ range: "7d", search: "", repository: "all", employee: "all", page: 1, pageSize: 25 });
+    expect(snapshot.employees.map((employee) => employee.login)).toEqual(["dev-c"]);
+    expect(snapshot.repositories[0].members.map((member) => member.login)).toEqual(["dev-c"]);
+    // The bot's run is still real CI activity, so it stays in the totals.
+    expect(snapshot.metrics.scans).toBe(2);
+  });
 });

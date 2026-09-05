@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { db } from "./controlPlaneDb";
-import type { OrganizationSnapshot, Incident, EmployeeRisk, RepositoryRisk } from "./organization";
+import type { OrganizationSnapshot, Incident, EmployeeRisk, RepositoryRisk, DailySecurityPoint } from "./organization";
 
 type JsonObject = Record<string, unknown>;
 type ScanPayload = { version?: string; summary?: JsonObject; findings?: JsonObject[]; context?: JsonObject };
@@ -86,30 +86,108 @@ export function upsertPerson(person: JsonObject, repository?: string): void {
     ON CONFLICT(repository,login) DO UPDATE SET updated_at=excluded.updated_at`).run(repository, login, now);
 }
 
-function sinceFor(range: string): Date {
-  const days = range === "today" ? 1 : Math.max(1, Number.parseInt(range, 10) || 7);
-  return new Date(Date.now() - days * 86_400_000);
+const DAY_MS = 86_400_000;
+
+function rangeDays(range: string): number {
+  return range === "today" ? 1 : Math.max(1, Number.parseInt(range, 10) || 7);
+}
+
+function dayKey(iso: string): string { return iso.slice(0, 10); }
+
+function dayLabel(key: string, isToday: boolean): string {
+  if (isToday) return "Today";
+  return new Date(`${key}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "2-digit", timeZone: "UTC" });
+}
+
+function relativeTime(iso: string): string {
+  const minutes = Math.round((Date.now() - Date.parse(iso)) / 60_000);
+  if (!Number.isFinite(minutes)) return iso;
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1_440) return `${Math.round(minutes / 60)} hr ago`;
+  return `${Math.round(minutes / 1_440)} d ago`;
+}
+
+type CheckRate = { total: number; passed: number; failed: number; cleanRate: number };
+
+function rateOf(scanSet: ScanRow[], runSet: WorkflowRow[]): CheckRate {
+  const passed = scanSet.filter((scan) => scan.gate_status === "passed").length + runSet.filter((run) => run.conclusion === "success").length;
+  const failed = scanSet.filter((scan) => scan.gate_status !== "passed").length + runSet.filter((run) => run.conclusion === "failure").length;
+  const total = scanSet.length + runSet.length;
+  return { total, passed, failed, cleanRate: total ? Math.round(passed / total * 100) : 0 };
+}
+
+// "web-flow" is the identity GitHub signs browser-made merge commits with, not a person.
+const BOT_LOGINS = new Set(["github-actions", "dependabot", "copilot", "github-advanced-security", "renovate", "web-flow"]);
+
+/** GitHub attributes automated pushes to app identities. Their runs are real CI
+ *  activity and stay in the repository and organization totals, but they are not
+ *  employees - left in the people lists, a bot with a spotless run history sits
+ *  at the top of the risk leaderboard ahead of everyone who actually writes code. */
+function isBot(login: string): boolean {
+  const name = login.toLowerCase();
+  return name.endsWith("[bot]") || BOT_LOGINS.has(name.replace(/\[bot\]$/, ""));
+}
+
+type FixEvent = { actor: string; repository: string; branch: string; at: string; hours: number };
+
+/** Red-to-green transitions on a branch: a check that failed and later passed
+ *  is a leak somebody actually went back and closed. Nothing else in the store
+ *  records a remediation, so without this the "errors fixed" series has no
+ *  source at all and every day of the chart reads zero. */
+function fixEvents(runs: WorkflowRow[]): FixEvent[] {
+  const pending = new Map<string, WorkflowRow>();
+  const events: FixEvent[] = [];
+  for (const run of [...runs].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+    const key = `${run.repository}:${run.branch}`;
+    if (run.conclusion === "failure") {
+      if (!pending.has(key)) pending.set(key, run);
+      continue;
+    }
+    if (run.conclusion !== "success") continue;
+    const broke = pending.get(key);
+    if (!broke) continue;
+    pending.delete(key);
+    events.push({
+      actor: run.actor, repository: run.repository, branch: run.branch, at: run.created_at,
+      hours: Math.max(0, (Date.parse(run.created_at) - Date.parse(broke.created_at)) / 3_600_000),
+    });
+  }
+  return events;
 }
 
 export function buildOrganizationSnapshot(filters: { range: string; search: string; repository: string; employee: string; page: number; pageSize: number }): OrganizationSnapshot {
   const connection = db();
-  const since = sinceFor(filters.range).toISOString();
-  const scans = connection.prepare("SELECT * FROM scans WHERE detected_at >= ? ORDER BY detected_at DESC").all(since) as unknown as ScanRow[];
+  const days = rangeDays(filters.range);
+  const since = new Date(Date.now() - days * DAY_MS).toISOString();
+  // Read twice the window: the older half is never displayed, it only supplies
+  // the baseline the "vs previous period" deltas are measured against.
+  const priorSince = new Date(Date.now() - 2 * days * DAY_MS).toISOString();
+  const scanHistory = connection.prepare("SELECT * FROM scans WHERE detected_at >= ? ORDER BY detected_at DESC").all(priorSince) as unknown as ScanRow[];
+  const workflowHistory = connection.prepare("SELECT run_id,repository,actor,branch,workflow,status,conclusion,run_url,created_at FROM workflow_runs WHERE created_at >= ? ORDER BY created_at DESC").all(priorSince) as unknown as WorkflowRow[];
+  const scans = scanHistory.filter((scan) => scan.detected_at >= since);
+  const workflows = workflowHistory.filter((run) => run.created_at >= since);
   const repoRows = connection.prepare("SELECT full_name,name,language FROM repositories ORDER BY name").all() as unknown as RepoRow[];
   const people = connection.prepare("SELECT login,name FROM people ORDER BY login").all() as unknown as PersonRow[];
   const memberships = connection.prepare("SELECT repository,login FROM repository_members").all() as unknown as MemberRow[];
-  const workflows = connection.prepare("SELECT run_id,repository,actor,branch,workflow,status,conclusion,run_url,created_at FROM workflow_runs WHERE created_at >= ? ORDER BY created_at DESC").all(since) as unknown as WorkflowRow[];
-  const scanRunUrls = new Set(scans.map((scan) => scan.run_url).filter((url): url is string => Boolean(url)));
+  const scanRunUrls = new Set(scanHistory.map((scan) => scan.run_url).filter((url): url is string => Boolean(url)));
   // A signed LeakGuard report is the richest source of truth. GitHub workflow
   // results fill the gap when a report has not reached the control plane yet,
   // so an employee can never appear 100% accurate with zero recorded checks.
-  const workflowChecks = workflows.filter((run) => (run.conclusion === "success" || run.conclusion === "failure") && (!run.run_url || !scanRunUrls.has(run.run_url)));
+  const completed = (runs: WorkflowRow[]) => runs.filter((run) => (run.conclusion === "success" || run.conclusion === "failure") && (!run.run_url || !scanRunUrls.has(run.run_url)));
+  const workflowChecks = completed(workflows);
+  const priorChecks = completed(workflowHistory.filter((run) => run.created_at < since));
+  const priorScans = scanHistory.filter((scan) => scan.detected_at < since);
   const checkStats = (actor?: string, repository?: string) => {
     const reportChecks = scans.filter((scan) => (!actor || scan.actor === actor) && (!repository || scan.repository === repository));
     const workflowOnly = workflowChecks.filter((run) => (!actor || run.actor === actor) && (!repository || run.repository === repository));
-    const passed = reportChecks.filter((scan) => scan.gate_status === "passed").length + workflowOnly.filter((run) => run.conclusion === "success").length;
-    return { total: reportChecks.length + workflowOnly.length, passed, blocked: reportChecks.filter((scan) => scan.gate_status !== "passed").length + workflowOnly.filter((run) => run.conclusion === "failure").length };
+    const rate = rateOf(reportChecks, workflowOnly);
+    return { total: rate.total, passed: rate.passed, blocked: rate.failed };
   };
+  // Detected over the full history so a fix landing today is still credited
+  // when the failure that preceded it fell just outside the window.
+  const fixes = fixEvents(completed(workflowHistory));
+  const windowFixes = fixes.filter((event) => event.at >= since);
   const names = new Map(people.map((person) => [person.login, person.name]));
   const latestScopeScan = new Map<string, number>();
   for (const scan of scans) {
@@ -117,6 +195,7 @@ export function buildOrganizationSnapshot(filters: { range: string; search: stri
     if (!latestScopeScan.has(scope)) latestScopeScan.set(scope, scan.id);
   }
   const incidentMap = new Map<string, Incident>();
+  const incidentAt = new Map<string, string>();
   for (const scan of scans) {
     let parsed: ScanPayload = {};
     try { parsed = JSON.parse(scan.payload) as ScanPayload; } catch { continue; }
@@ -127,19 +206,48 @@ export function buildOrganizationSnapshot(filters: { range: string; search: stri
       const acquired = (finding.acquired_at as JsonObject | undefined) ?? {};
       const path = Array.isArray(finding.leak_path) ? finding.leak_path as JsonObject[] : [];
       const isCurrent = latestScopeScan.get(`${scan.repository}:${scan.actor}:${scan.branch}`) === scan.id;
+      incidentAt.set(incidentKey, scan.detected_at);
       incidentMap.set(incidentKey, {
         id: `LG-${scan.id}-${index + 1}`, employee: scan.actor, repository: scan.repository, branch: scan.branch,
         pr: scan.pr_number ?? 0, file: `${string(finding.file, "unknown")}:${number(acquired.line)}`,
         resource: string(finding.resource, "resource"), confidence: string(finding.confidence, "possible") as Incident["confidence"],
         status: isCurrent ? "open" : "fixed", gate: isCurrent && scan.gate_status === "blocked" ? "blocked" : "passed",
-        detectedAt: scan.detected_at, reason: string(finding.reason, "Resource cleanup is missing on a reachable path."),
+        detectedAt: relativeTime(scan.detected_at), reason: string(finding.reason, "Resource cleanup is missing on a reachable path."),
         leakPath: path.map((step) => `L${number(step.line)} ${string(step.note)}`), runUrl: scan.run_url ?? undefined,
       });
     });
   }
-  const incidents = [...incidentMap.values()];
+  // A signed report carries finding-level detail. Where no report has reached
+  // the control plane for a branch, a failed check is still a real, attributable
+  // enforcement event - so record it, labelled for exactly what it is, instead
+  // of leaving the audit trail blank and every severity column reading zero.
+  const reportedScopes = new Set(scans.map((scan) => `${scan.repository}:${scan.branch}`));
+  const latestByCheck = new Map<string, WorkflowRow>();
+  for (const run of workflowChecks) {
+    const key = `${run.repository}:${run.branch}:${run.workflow}`;
+    const seen = latestByCheck.get(key);
+    if (!seen || run.created_at > seen.created_at) latestByCheck.set(key, run);
+  }
+  for (const run of workflowChecks) {
+    if (run.conclusion !== "failure" || reportedScopes.has(`${run.repository}:${run.branch}`)) continue;
+    const stillFailing = latestByCheck.get(`${run.repository}:${run.branch}:${run.workflow}`)?.run_id === run.run_id;
+    const key = `run:${run.run_id}`;
+    incidentAt.set(key, run.created_at);
+    incidentMap.set(key, {
+      id: `RUN-${run.run_id}`, employee: run.actor, repository: run.repository, branch: run.branch, pr: 0,
+      file: `${run.repository}@${run.branch}`, resource: run.workflow, confidence: "possible",
+      status: stillFailing ? "open" : "fixed", gate: stillFailing ? "blocked" : "passed", detectedAt: relativeTime(run.created_at),
+      reason: `The "${run.workflow}" check failed on ${run.branch}, so the merge gate held. No signed LeakGuard report reached the control plane for this run, so the finding-level detail is in the run log rather than here.`,
+      leakPath: [`Run ${run.run_id} started on ${run.branch}`, `Check "${run.workflow}" concluded failure`,
+                 stillFailing ? "Branch is still red - merge blocked" : "A later run on this branch passed"],
+      runUrl: run.run_url ?? undefined,
+    });
+  }
+  const incidents = [...incidentMap.entries()]
+    .sort((a, b) => (incidentAt.get(b[0]) ?? "").localeCompare(incidentAt.get(a[0]) ?? ""))
+    .map(([, incident]) => incident);
   const repoNames = new Set([...repoRows.map((repo) => repo.full_name), ...scans.map((scan) => scan.repository)]);
-  const employeeNames = new Set([...people.map((person) => person.login), ...scans.map((scan) => scan.actor), ...workflowChecks.map((run) => run.actor)]);
+  const employeeNames = new Set([...people.map((person) => person.login), ...scans.map((scan) => scan.actor), ...workflowChecks.map((run) => run.actor)].filter((login) => !isBot(login)));
   const employeeRows: EmployeeRisk[] = [...employeeNames].map((login) => {
     const mine = scans.filter((scan) => scan.actor === login);
     const mineIncidents = incidents.filter((incident) => incident.employee === login);
@@ -149,12 +257,14 @@ export function buildOrganizationSnapshot(filters: { range: string; search: stri
     const stats = checkStats(login);
     const repositories = repos.map((repository) => { const checks = checkStats(login, repository); const errors = mineIncidents.filter((incident) => incident.repository === repository).length; return { repository, checks: checks.total, cleanRate: checks.total ? Math.round(checks.passed / checks.total * 100) : 0, errors, blocked: checks.blocked }; });
     const cleanRate = stats.total ? Math.round(stats.passed / stats.total * 100) : 0;
-    return { login, name: names.get(login) ?? login, avatar: login[0]?.toUpperCase() ?? "?", scans: stats.total, blocked: stats.blocked, open: mineOpen.length, fixed: mineFixed, fixRate: mineIncidents.length ? Math.round(mineFixed / mineIncidents.length * 100) : 100, cleanRate, avgFixHours: 0, score: stats.total ? Math.max(0, cleanRate - mineOpen.length * 2) : 0, scoreDelta: 0, cleanRateDelta: 0, definite: mineOpen.filter((i) => i.confidence === "definite").length, likely: mineOpen.filter((i) => i.confidence === "likely").length, possible: mineOpen.filter((i) => i.confidence === "possible").length, repeats: Math.max(0, mineIncidents.length - new Set(mineIncidents.map((i) => i.resource)).size), topResource: mineOpen[0]?.resource ?? "None", repositories };
+    const myFixes = fixes.filter((event) => event.actor === login);
+    const avgFixHours = myFixes.length ? Number((myFixes.reduce((sum, event) => sum + event.hours, 0) / myFixes.length).toFixed(1)) : 0;
+    return { login, name: names.get(login) ?? login, avatar: login[0]?.toUpperCase() ?? "?", scans: stats.total, blocked: stats.blocked, open: mineOpen.length, fixed: mineFixed, fixRate: mineIncidents.length ? Math.round(mineFixed / mineIncidents.length * 100) : 100, cleanRate, avgFixHours, score: stats.total ? Math.max(0, cleanRate - mineOpen.length * 2) : 0, scoreDelta: 0, cleanRateDelta: 0, definite: mineOpen.filter((i) => i.confidence === "definite").length, likely: mineOpen.filter((i) => i.confidence === "likely").length, possible: mineOpen.filter((i) => i.confidence === "possible").length, repeats: Math.max(0, mineIncidents.length - new Set(mineIncidents.map((i) => i.resource)).size), topResource: mineOpen[0]?.resource ?? "None", repositories };
   });
   const activity = workflows.map((run) => ({ repository: run.repository, id: run.run_id, employee: run.actor, branch: run.branch, workflow: run.workflow, status: run.status, conclusion: run.conclusion ?? "pending", createdAt: run.created_at, runUrl: run.run_url ?? undefined }));
   const repositoryRows: RepositoryRisk[] = [...repoNames].map((fullName) => {
     const row = repoRows.find((repo) => repo.full_name === fullName); const repoScans = scans.filter((scan) => scan.repository === fullName); const repoIncidents = incidents.filter((incident) => incident.repository === fullName);
-    const memberLogins = [...new Set([...memberships.filter((member) => member.repository === fullName).map((member) => member.login), ...repoScans.map((scan) => scan.actor), ...workflowChecks.filter((run) => run.repository === fullName).map((run) => run.actor)])];
+    const memberLogins = [...new Set([...memberships.filter((member) => member.repository === fullName).map((member) => member.login), ...repoScans.map((scan) => scan.actor), ...workflowChecks.filter((run) => run.repository === fullName).map((run) => run.actor)].filter((login) => !isBot(login)))];
     const members = memberLogins.map((login) => { const checks = checkStats(login, fullName); const errors = repoIncidents.filter((incident) => incident.employee === login).length; return { login, checks: checks.total, cleanRate: checks.total ? Math.round(checks.passed / checks.total * 100) : 0, errors, blocked: checks.blocked }; });
     const repoStats = checkStats(undefined, fullName); const open = repoIncidents.filter((incident) => incident.status === "open").length; const measuredMembers = members.filter((member) => member.checks); return { name: fullName, language: row?.language ?? "Unknown", open, blockedPrs: repoStats.blocked, scans: repoStats.total, risk: open > 10 ? "critical" : open ? "high" : "low", members, teams: members.length ? [{ name: "Repository contributors", lead: members[0].login, members: members.map((m) => m.login), cleanRate: measuredMembers.length ? Math.round(measuredMembers.reduce((s,m) => s + m.cleanRate, 0) / measuredMembers.length) : 0, open, blocked: repoStats.blocked }] : [], activity: activity.filter((entry) => entry.repository === fullName) };
   });
@@ -164,13 +274,57 @@ export function buildOrganizationSnapshot(filters: { range: string; search: stri
   const filteredEmployees = employeeRows.filter((item) => (filters.employee === "all" || item.login === filters.employee) && (filters.repository === "all" || item.repositories.some((repo) => repo.repository === filters.repository)) && match(item.login, item.name, item.topResource, ...item.repositories.map((repo) => repo.repository)));
   const filteredRepos = repositoryRows.filter((item) => (filters.repository === "all" || item.name === filters.repository) && (filters.employee === "all" || item.members.some((member) => member.login === filters.employee)) && match(item.name, item.language));
   const start = (filters.page - 1) * filters.pageSize;
-  const dayMap = new Map<string, { opened: number; fixed: number; blocked: number; scans: number; passed: number }>();
-  for (const scan of scans) { const date = scan.detected_at.slice(0, 10); const point = dayMap.get(date) ?? { opened: 0, fixed: 0, blocked: 0, scans: 0, passed: 0 }; point.opened += scan.total; point.blocked += scan.gate_status === "blocked" ? 1 : 0; point.scans += 1; point.passed += scan.gate_status === "passed" ? 1 : 0; dayMap.set(date, point); }
-  const trend = [...dayMap.entries()].sort().map(([date, point]) => ({ date, opened: point.opened, fixed: point.fixed, blocked: point.blocked, accuracy: point.scans ? Math.round(point.passed / point.scans * 100) : 100 }));
+  // Every day in the window gets a bucket up front, so a quiet day plots as a
+  // real zero instead of vanishing and pulling the line across the gap.
+  const dayKeys = Array.from({ length: days }, (_, index) => new Date(Date.now() - (days - 1 - index) * DAY_MS).toISOString().slice(0, 10));
+  const buildTrend = (actor?: string): DailySecurityPoint[] => {
+    const dayMap = new Map(dayKeys.map((key) => [key, { opened: 0, fixed: 0, blocked: 0, checks: 0, passed: 0 }]));
+    for (const scan of scans) {
+      if (actor && scan.actor !== actor) continue;
+      const point = dayMap.get(dayKey(scan.detected_at));
+      if (!point) continue;
+      point.opened += scan.total; point.checks += 1;
+      if (scan.gate_status === "passed") point.passed += 1; else point.blocked += 1;
+    }
+    for (const run of workflowChecks) {
+      if (actor && run.actor !== actor) continue;
+      const point = dayMap.get(dayKey(run.created_at));
+      if (!point) continue;
+      point.checks += 1;
+      if (run.conclusion === "success") point.passed += 1; else { point.opened += 1; point.blocked += 1; }
+    }
+    for (const event of windowFixes) {
+      if (actor && event.actor !== actor) continue;
+      const point = dayMap.get(dayKey(event.at));
+      if (point) point.fixed += 1;
+    }
+    // A day with no checks has no accuracy of its own. Hold the last known
+    // value across the gap - dropping to zero would read as a total collapse
+    // when in fact nobody pushed that day - and backfill the days before the
+    // first check with that first real reading rather than an invented 100%.
+    const measured = dayKeys.map((key) => { const point = dayMap.get(key)!; return point.checks ? Math.round(point.passed / point.checks * 100) : null; });
+    const first = measured.find((value) => value !== null) ?? 100;
+    let carried = first;
+    return dayKeys.map((key, index) => {
+      const point = dayMap.get(key)!;
+      carried = measured[index] ?? carried;
+      return { date: dayLabel(key, index === dayKeys.length - 1), accuracy: carried, opened: point.opened, fixed: point.fixed, blocked: point.blocked };
+    });
+  };
+  const trend = buildTrend();
   const allStats = checkStats();
+  const priorRate = rateOf(priorScans, priorChecks);
+  const currentRate = rateOf(scans, workflowChecks);
   const blocked = allStats.blocked;
   const passed = allStats.passed;
   const openIncidents = incidents.filter((incident) => incident.status === "open").length;
   const fixedIncidents = incidents.length - openIncidents;
-  return { organization: process.env.LEAKGUARD_GITHUB_ORG ?? repoRows[0]?.full_name.split("/")[0] ?? "LeakGuard Organization", source: "control-plane", generatedAt: new Date().toISOString(), metrics: { employees: employeeRows.length, repositories: repositoryRows.length, open: openIncidents, blockedPrs: blocked, fixRate: incidents.length ? Math.round(fixedIncidents / incidents.length * 100) : 100, scans: allStats.total, cleanRate: allStats.total ? Math.round(passed / allStats.total * 100) : 0, cleanRateDelta: 0, openDelta: 0, githubFailures: workflows.filter((run) => run.conclusion === "failure").length }, employees: filteredEmployees.slice(start, start + filters.pageSize), repositories: filteredRepos.slice(start, start + filters.pageSize), incidents: filteredIncidents.slice(start, start + filters.pageSize), trend, pagination: { page: filters.page, pageSize: filters.pageSize, totalEmployees: filteredEmployees.length, totalRepositories: filteredRepos.length, totalIncidents: filteredIncidents.length } };
+  // Busiest first. Alphabetical order buried every repository that has actually
+  // run a check behind ten that have never been scanned, so page one read as an
+  // organization with no activity at all.
+  const pagedEmployees = [...filteredEmployees].sort((a, b) => b.scans - a.scans || b.open - a.open || a.login.localeCompare(b.login)).slice(start, start + filters.pageSize);
+  const pagedRepositories = [...filteredRepos].sort((a, b) => b.scans - a.scans || b.open - a.open || a.name.localeCompare(b.name)).slice(start, start + filters.pageSize);
+  // Only the employees actually on this page carry a per-day series.
+  const employeesWithTrend = pagedEmployees.map((employee) => ({ ...employee, daily: buildTrend(employee.login) }));
+  return { organization: process.env.LEAKGUARD_GITHUB_ORG ?? repoRows[0]?.full_name.split("/")[0] ?? "LeakGuard Organization", source: "control-plane", generatedAt: new Date().toISOString(), metrics: { employees: employeeRows.length, repositories: repositoryRows.length, open: openIncidents, blockedPrs: blocked, fixRate: incidents.length ? Math.round(fixedIncidents / incidents.length * 100) : 100, scans: allStats.total, cleanRate: allStats.total ? Math.round(passed / allStats.total * 100) : 0, cleanRateDelta: priorRate.total ? currentRate.cleanRate - priorRate.cleanRate : 0, openDelta: currentRate.failed - priorRate.failed, githubFailures: workflows.filter((run) => run.conclusion === "failure").length }, employees: employeesWithTrend, repositories: pagedRepositories, incidents: filteredIncidents.slice(start, start + filters.pageSize), trend, pagination: { page: filters.page, pageSize: filters.pageSize, totalEmployees: filteredEmployees.length, totalRepositories: filteredRepos.length, totalIncidents: filteredIncidents.length } };
 }

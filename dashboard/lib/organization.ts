@@ -4,6 +4,8 @@ export interface EmployeeRisk {
   login: string; name: string; avatar: string; scans: number; blocked: number; open: number; fixed: number;
   fixRate: number; cleanRate: number; avgFixHours: number; score: number; scoreDelta: number; cleanRateDelta: number;
   definite: number; likely: number; possible: number; repeats: number; topResource: string; repositories: EmployeeRepositoryPerformance[];
+  /** This employee's own day-by-day series, attached only for the page being rendered. */
+  daily?: DailySecurityPoint[];
 }
 export interface RepositoryMember { login: string; checks: number; cleanRate: number; errors: number; blocked: number }
 export interface RepositoryTeam { name: string; lead: string; members: string[]; cleanRate: number; open: number; blocked: number }
