@@ -115,10 +115,12 @@ export async function scan(document: vscode.TextDocument): Promise<void> {
   }
 }
 
-async function scanWorkspace(): Promise<void> {
+async function scanWorkspace(options: { quiet?: boolean } = {}): Promise<void> {
   const root = workspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("LeakGuard: open a folder first - there is nothing to scan.");
+    if (!options.quiet) {
+      void vscode.window.showWarningMessage("LeakGuard: open a folder first - there is nothing to scan.");
+    }
     return;
   }
   await vscode.window.withProgress(
@@ -135,9 +137,11 @@ async function scanWorkspace(): Promise<void> {
       for (const [key, value] of grouped) findingsByUri.set(key, value);
       panel.replaceAll(grouped);
       refreshStatus();
-      void vscode.window.showInformationMessage(
-        `LeakGuard: ${findings.length} finding(s) across the workspace.`,
-      );
+      if (!options.quiet) {
+        void vscode.window.showInformationMessage(
+          `LeakGuard: ${findings.length} finding(s) across the workspace.`,
+        );
+      }
     },
   );
 }
@@ -504,6 +508,13 @@ function activateInner(context: vscode.ExtensionContext): void {
   void updateProtectionContext();
   if (settings().get("scanOnOpen", true)) {
     vscode.workspace.textDocuments.forEach((document) => void scan(document));
+  }
+
+  // Scan the whole workspace on startup so the panel is useful the moment it
+  // opens. Without this a reload leaves an empty tree and the only way to see
+  // anything is to find the scan button first.
+  if (workspaceRoot() && settings().get("scanOnStartup", true)) {
+    void scanWorkspace({ quiet: true });
   }
 }
 

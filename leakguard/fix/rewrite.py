@@ -79,8 +79,25 @@ def verified_patch(
     return patched if finding.fingerprint not in remaining else None
 
 
+#: A file with N independent leaks needs at most N rounds; the cap is a guard
+#: against a pathological case, not an expected limit.
+MAX_ROUNDS = 10
+
+
 def apply_fixes(findings: Iterable[Finding], write: bool = False) -> list[Path]:
-    """Generate only analyzer-verified fixes, optionally writing them to disk."""
+    """Generate only analyzer-verified fixes, optionally writing them to disk.
+
+    Fixes are applied round by round, re-analysing the patched source each
+    time, until a round makes no progress.
+
+    A single pass is not enough. Every ``Finding`` carries line numbers from
+    the source it was produced against, so the moment one patch lands the
+    remaining findings for that file describe a file that no longer exists:
+    their ``acquired_line`` and ``close_found_at`` point at shifted lines,
+    ``make_patch`` fails to match, and the leaks are silently left behind.
+    Re-deriving the findings after each round keeps them in step with the
+    text being edited.
+    """
     from leakguard.config import Config
     from leakguard.core.pipeline import analyze_source
 
@@ -90,20 +107,35 @@ def apply_fixes(findings: Iterable[Finding], write: bool = False) -> list[Path]:
             grouped[Path(finding.file)].append(finding)
 
     changed: list[Path] = []
-    for path, file_findings in grouped.items():
+    for path in grouped:
         try:
             original = path.read_text(encoding="utf-8")
         except OSError:
             continue
+
+        name = str(path).replace("\\", "/")
+        analyze = lambda candidate, n=name: analyze_source(candidate, n, Config())
         source = original
-        for finding in sorted(file_findings, key=lambda item: item.acquired_line, reverse=True):
-            patched = verified_patch(
-                finding,
-                source,
-                lambda candidate, p=path: analyze_source(candidate, str(p).replace("\\", "/"), Config()),
-            )
-            if patched is not None:
-                source = patched
+
+        for _ in range(MAX_ROUNDS):
+            try:
+                current = [f for f in analyze(source) if f.fix_available]
+            except (SyntaxError, ValueError):
+                break
+            if not current:
+                break
+
+            progressed = False
+            # Highest line first, so an earlier edit cannot shift a later one.
+            for finding in sorted(current, key=lambda item: item.acquired_line, reverse=True):
+                patched = verified_patch(finding, source, analyze)
+                if patched is not None:
+                    source = patched
+                    progressed = True
+                    break  # findings are now stale; re-derive them
+            if not progressed:
+                break
+
         if source != original:
             changed.append(path)
             if write:

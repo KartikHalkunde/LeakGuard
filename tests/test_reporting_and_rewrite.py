@@ -59,3 +59,38 @@ def test_fixture_findings_file_has_five_real_shaped_entries() -> None:
     with open("tests/fixtures/findings.json", encoding="utf-8") as fixture:
         payload = json.load(fixture)
     assert payload["version"] == "1.0" and len(payload["findings"]) == 5
+
+
+def test_apply_fixes_resolves_every_fixable_leak_in_one_file(tmp_path):
+    """One call must fix every fixable leak in a file, not just the first.
+
+    Findings carry line numbers from the source they were produced against, so
+    the moment one patch lands the rest describe a file that no longer exists:
+    their lines have shifted and the rewrite silently fails to match. Without
+    re-deriving findings between rounds the later leaks are left behind.
+    """
+    from leakguard import analyze
+    from leakguard.fix.rewrite import apply_fixes
+
+    def leaky(name: str, var: str) -> str:
+        return (
+            f"def {name}(path, bad):\n"
+            f"    {var} = open(path)\n"
+            f"    if bad:\n"
+            f"        return None\n"
+            f"    {var}.close()\n"
+            f"    return 'ok'\n"
+        )
+
+    source = tmp_path / "many.py"
+    source.write_text("\n\n".join(leaky(n, v) for n, v in
+                                 [("first", "f"), ("second", "g"), ("third", "h")]),
+                      encoding="utf-8")
+
+    before = analyze([source], None)
+    assert len(before) == 3, f"fixture should leak three times, got {len(before)}"
+
+    apply_fixes(before, write=True)
+
+    after = analyze([source], None)
+    assert after == [], f"expected every leak fixed, {len(after)} remain"
