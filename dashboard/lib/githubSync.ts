@@ -32,8 +32,7 @@ type SyncResult = { repositories: number; members: number; runs: number; skipped
 let pendingSync: Promise<SyncResult> | undefined;
 
 async function performSync(force = false): Promise<SyncResult> {
-  const organization = process.env.LEAKGUARD_GITHUB_ORG;
-  if (!organization) return { repositories: 0, members: 0, runs: 0, skipped: true };
+  const organization = process.env.LEAKGUARD_GITHUB_ORG ?? "KartikHalkunde";
   const connection = db();
   const state = connection.prepare("SELECT value FROM sync_state WHERE key='github_last_sync'").get() as { value?: string } | undefined;
   const ttl = Math.max(10, Number(process.env.LEAKGUARD_GITHUB_SYNC_SECONDS ?? 60)) * 1000;

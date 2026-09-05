@@ -14,10 +14,10 @@ def test_demo_repo_has_expected_seeded_findings() -> None:
     for finding in findings:
         counts[finding.confidence] += 1
 
-    assert len(findings) == 10
+    assert len(findings) == 11
     assert counts == {
         Confidence.DEFINITE: 1,
-        Confidence.LIKELY: 6,
+        Confidence.LIKELY: 7,
         Confidence.POSSIBLE: 3,
         Confidence.SAFE: 0,
     }
