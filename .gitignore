@@ -35,3 +35,5 @@ out/
 # Secrets
 .env
 .env.local
+
+demo-repo-clone/
